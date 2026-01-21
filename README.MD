@@ -1,77 +1,42 @@
-# RPi3B Baremetal Amiga-Style Graphics
+# 🕹️ RPi3B Baremetal Amiga-Style Graphics
 
-Exploração bare-metal do Raspberry Pi 3B inspirada nos gráficos clássicos do Amiga.  
-Objetivo: criar efeitos gráficos no framebuffer, simulando *blitter*, *copper* e outros truques clássicos, do boot ao frame final — tudo sem sistema operacional.
+Exploração bare-metal do Raspberry Pi 3B focada em computação gráfica clássica e matemática volumétrica. O objetivo é transformar o Pi em uma "Amiga moderna", implementando truques clássicos de demoscene diretamente no metal.
 
-- **Boot via UEFI** (compatível com Pi 3B+ firmware open source)
-- **Acesso ao framebuffer** (sem Linux, direto no metal)
-- **Blitter/Copper por software** (exemplos didáticos e evolutivos)
-- **Código em C (e opcionalmente Rust)**
+## 🚀 O Projeto
+Um motor gráfico escrito em **Rust** (bare-metal) que gerencia o hardware sem sistema operacional, focado em performance bruta e efeitos de varredura.
 
-> **Aviso**: Projeto experimental e didático. Não recomendado para produção.
+### 🎨 Core Engine (Estilo Amiga)
+* **Software Copper:** Sincronia de raster para gradientes de fundo e mudanças de paleta por linha.
+* **Software Blitter:** Manipulação de blocos de memória e transparências otimizadas via instruções **NEON**.
+* **Framebuffer Driver:** Controle direto da GPU via Mailbox Interface para renderização de baixa latência.
 
-## Estrutura
-
-- `src/` - Códigos-fonte dos efeitos, inicialização, blitter, copper, etc.
-- `docs/` - Documentação técnica e referências
-- `build/` - Binários gerados
-- `tools/` - Scripts auxiliares
-
-## Como rodar
-
-1. Compile com o toolchain ARM (ex: GCC ARM)
-2. Gere binário UEFI (`.efi`) para boot na firmware UEFI do Pi 3B+
-3. Copie para SD (partição FAT32) e faça o boot
-
-Veja `docs/uefi-boot.md` para detalhes de configuração do firmware.
-
-## Roadmap
-
-- [ ] Inicializar framebuffer e preencher a tela
-- [ ] Implementar "blitter" para cópia rápida de blocos
-- [ ] Simular copper/raster effects
-- [ ] Efeitos clássicos (scrolltext, barras, plasma, etc)
-- [ ] (Opcional) Portar para Rust ou Assembly
-
-
-# 🧪 raspberry-labs
-
-Laboratório de experimentos bare-metal e low-level no Raspberry Pi 3B.
-
-Aqui você encontra projetos de baixo nível para Raspberry Pi, explorando gráficos, boot via UEFI, manipulação direta de hardware, e inspirações em clássicos como o Amiga.
-
-## Projetos
-
-- [`amiga-blitter/`](amiga-blitter/) — Efeitos gráficos no framebuffer inspirados no Amiga (blitter, copper, raster).
-- [`uefi-boot/`](uefi-boot/) — Exemplos de inicialização do Raspberry Pi via UEFI.
-- [`framebuffer-fx/`](framebuffer-fx/) — Experimentos de manipulação direta do framebuffer.
-- [`gpio-tests/`](gpio-tests/) — Testes básicos com GPIO, LEDs e sensores.
-
-## Objetivo
-
-Reunir estudos, exemplos e ferramentas para quem quer aprender ou experimentar o Raspberry Pi além do Linux, direto no metal.
-
-> Projeto aberto, educacional e em evolução contínua.  
-> Contribuições e forks são bem-vindos!
+### 📺 Demos & Efeitos
+* **3D Scene:** Plotagem e rotação de funções volumétricas ($z = f(x, y)$) como paraboloides e campos de seno.
+* **Oldschool FX:** Implementações clássicas de Flame, Plasma, Starfields e Scrolltext.
+* **Raster Bars:** As famosas Copper bars que definiram a estética do Amiga.
 
 ---
 
-## Como começar
+## 🛠️ Stack Técnica
+* **Linguagem:** Rust `no_std` + AArch64 Assembly.
+* **Boot:** Nativo (`kernel8.img`) carregado em `0x80000`.
+* **Target:** `aarch64-unknown-none-softfloat`.
+* **Hardware:** Raspberry Pi 3B / 3B+.
 
-Cada subprojeto possui seu próprio README, explicando requisitos, compilação e execução.
-
-```code
-raspberry-labs/
-  amiga-blitter/
-  framebuffer-fx/
-  uefi-boot/
-  gpio-tests/
-  docs/
-  tools/
+## 📁 Estrutura do Código
+```text
+src/
+├── boot.S        # Inicialização da CPU e setup da Stack
+├── main.rs       # Orquestrador das Demos e loop principal
+├── fb_driver.rs  # Negociação de Mailbox e controle do Framebuffer
+├── blitter.rs    # Operações de bloco e transparência (NEON)
+├── copper.rs     # Sincronia de raster e efeitos de varredura
+├── math_3d.rs    # Projeção de perspectiva e rotação 3D
+├── functions.rs  # Fórmulas das superfícies (z = x² + y², etc)
+└── demos/        # Scripts das cenas individuais (flame, starfield, 3d)
 ```
 
-## Licença
-
-MIT, exceto onde indicado.
-
----
+## 🏁 Como Rodar
+1.  **Build:** `cargo build --release`
+2.  **Binário:** `rust-objcopy --strip-all -O binary target/.../amiga-blitter kernel8.img`
+3.  **Deploy:** Copie o `kernel8.img` para um cartão SD com o firmware básico do RPi3.
