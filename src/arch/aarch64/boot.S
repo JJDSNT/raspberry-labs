@@ -2,6 +2,9 @@
 .global _start
 
 _start:
+    // Salva o ponteiro do DTB recebido em x0
+    mov x20, x0
+
     // Descobre core atual
     mrs x0, mpidr_el1
     and x0, x0, #0x3
@@ -28,6 +31,8 @@ _start:
     b 2b
 
 3:
+    // Restaura o ponteiro do DTB em x0 para o Rust
+    mov x0, x20
     bl kernel_main
 
 4:
