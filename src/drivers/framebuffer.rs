@@ -5,14 +5,12 @@ use crate::platform::mailbox::mailbox_call;
 
 const MBOX_CH_PROP: u8 = 8;
 
-// Mailbox property message buffer.
-// 36 words deixa uma pequena folga.
 #[repr(C, align(16))]
 struct MailboxBuffer {
-    data: [u32; 36],
+    data: [u32; 40],
 }
 
-static mut MBOX: MailboxBuffer = MailboxBuffer { data: [0; 36] };
+static mut MBOX: MailboxBuffer = MailboxBuffer { data: [0; 40] };
 
 pub struct Framebuffer {
     pub ptr: *mut u8,
@@ -31,8 +29,8 @@ impl Framebuffer {
 
             let m = addr_of_mut!(MBOX.data) as *mut u32;
 
-            // total size = 34 words = 136 bytes
-            write_volatile(m.add(0), 34 * 4);
+            // 40 words = 160 bytes (FIX: era 39 * 4, faltava o último word)
+            write_volatile(m.add(0), 40 * 4);
             write_volatile(m.add(1), 0);
 
             // set physical width/height
@@ -49,39 +47,49 @@ impl Framebuffer {
             write_volatile(m.add(10), width);
             write_volatile(m.add(11), height);
 
+            // set virtual offset = (0, 0)
+            write_volatile(m.add(12), 0x0004_8009);
+            write_volatile(m.add(13), 8);
+            write_volatile(m.add(14), 8);
+            write_volatile(m.add(15), 0);
+            write_volatile(m.add(16), 0);
+
             // set depth
-            write_volatile(m.add(12), 0x0004_8005);
-            write_volatile(m.add(13), 4);
-            write_volatile(m.add(14), 4);
-            write_volatile(m.add(15), depth);
+            write_volatile(m.add(17), 0x0004_8005);
+            write_volatile(m.add(18), 4);
+            write_volatile(m.add(19), 4);
+            write_volatile(m.add(20), depth);
 
             // set pixel order (1 = RGB)
-            write_volatile(m.add(16), 0x0004_8006);
-            write_volatile(m.add(17), 4);
-            write_volatile(m.add(18), 4);
-            write_volatile(m.add(19), 1);
+            write_volatile(m.add(21), 0x0004_8006);
+            write_volatile(m.add(22), 4);
+            write_volatile(m.add(23), 4);
+            write_volatile(m.add(24), 1);
 
             // allocate framebuffer
-            write_volatile(m.add(20), 0x0004_0001);
-            write_volatile(m.add(21), 8);
-            write_volatile(m.add(22), 8);
-            write_volatile(m.add(23), 16);
-            write_volatile(m.add(24), 0);
+            write_volatile(m.add(25), 0x0004_0001);
+            write_volatile(m.add(26), 8);
+            write_volatile(m.add(27), 8);
+            // FIX: alinhamento 4096 (era 16). O GPU escreve o endereço aqui na resposta.
+            write_volatile(m.add(28), 4096);
+            write_volatile(m.add(29), 0);
 
             // get pitch
-            write_volatile(m.add(25), 0x0004_0008);
-            write_volatile(m.add(26), 4);
-            write_volatile(m.add(27), 4);
-            write_volatile(m.add(28), 0);
+            write_volatile(m.add(30), 0x0004_0008);
+            write_volatile(m.add(31), 4);
+            write_volatile(m.add(32), 4);
+            write_volatile(m.add(33), 0);
 
             // get pixel order
-            write_volatile(m.add(29), 0x0004_0006);
-            write_volatile(m.add(30), 4);
-            write_volatile(m.add(31), 4);
-            write_volatile(m.add(32), 0);
+            write_volatile(m.add(34), 0x0004_0006);
+            write_volatile(m.add(35), 4);
+            write_volatile(m.add(36), 4);
+            write_volatile(m.add(37), 0);
 
             // end tag
-            write_volatile(m.add(33), 0);
+            write_volatile(m.add(38), 0);
+            // FIX: padding para completar os 40 words
+            write_volatile(m.add(39), 0);
 
             log!("FB", "calling mailbox...");
             if !mailbox_call(MBOX_CH_PROP, m) {
@@ -91,9 +99,11 @@ impl Framebuffer {
 
             log!("FB", "mailbox returned");
 
-            let fb_ptr = read_volatile(m.add(24)) & 0x3FFF_FFFF;
-            let pitch = read_volatile(m.add(28));
-            let isrgb = read_volatile(m.add(32));
+            // FIX: o GPU escreve o endereço do framebuffer no índice 28 (não 29).
+            // O índice 29 é o tamanho alocado, não o ponteiro.
+            let fb_ptr = read_volatile(m.add(28)) & 0x3FFF_FFFF;
+            let pitch = read_volatile(m.add(33));
+            let isrgb = read_volatile(m.add(37));
 
             log!("FB", "fb_ptr=0x{:08X}", fb_ptr);
             log!("FB", "pitch={}", pitch);
@@ -123,8 +133,10 @@ impl Framebuffer {
     #[inline(always)]
     pub fn color_rgb(&self, r: u8, g: u8, b: u8) -> u32 {
         if self.isrgb != 0 {
+            // XRGB
             ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         } else {
+            // XBGR
             ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
         }
     }
@@ -150,20 +162,10 @@ impl Framebuffer {
         }
     }
 
+    // FIX: simplificado — delega para fill_rect evitando duplicação
     pub fn clear(&mut self, color: u32) {
         log!("FB", "clear color=0x{:08X}", color);
-
-        if self.depth != 32 {
-            log!("FB", "clear only supports 32bpp for now");
-            return;
-        }
-
-        for y in 0..self.height {
-            for x in 0..self.width {
-                self.put_pixel(x, y, color);
-            }
-        }
-
+        self.fill_rect(0, 0, self.width, self.height, color);
         log!("FB", "clear done");
     }
 
@@ -173,14 +175,50 @@ impl Framebuffer {
             return;
         }
 
-        let x_end = x.saturating_add(w).min(self.width);
-        let y_end = y.saturating_add(h).min(self.height);
+        let x0 = x.min(self.width);
+        let y0 = y.min(self.height);
+        let x1 = x.saturating_add(w).min(self.width);
+        let y1 = y.saturating_add(h).min(self.height);
 
-        for yy in y..y_end {
-            for xx in x..x_end {
-                self.put_pixel(xx, yy, color);
+        // FIX: removidos os casts `as u32` redundantes/ambíguos
+        for yy in y0..y1 {
+            let row = unsafe { self.ptr.add(yy as usize * self.pitch as usize) as *mut u32 };
+            for xx in x0..x1 {
+                unsafe {
+                    write_volatile(row.add(xx as usize), color);
+                }
             }
         }
+    }
+
+    pub fn draw_gradient(&mut self) {
+        log!("FB", "drawing gradient");
+
+        if self.depth != 32 {
+            log!("FB", "draw_gradient only supports 32bpp for now");
+            return;
+        }
+
+        let width_max = self.width.saturating_sub(1).max(1);
+        let height_max = self.height.saturating_sub(1).max(1);
+
+        for y in 0..self.height {
+            let row = unsafe { self.ptr.add(y as usize * self.pitch as usize) as *mut u32 };
+
+            for x in 0..self.width {
+                let r = ((x * 255) / width_max) as u8;
+                let g = ((y * 255) / height_max) as u8;
+                let b = 128u8;
+
+                let color = self.color_rgb(r, g, b);
+
+                unsafe {
+                    write_volatile(row.add(x as usize), color);
+                }
+            }
+        }
+
+        log!("FB", "gradient done");
     }
 
     pub fn test_pattern(&mut self) {
@@ -203,30 +241,5 @@ impl Framebuffer {
         self.fill_rect(cx.saturating_sub(16), cy.saturating_sub(16), 32, 32, white);
 
         log!("FB", "test pattern done");
-    }
-
-    pub fn draw_gradient(&mut self) {
-        log!("FB", "drawing gradient");
-
-        if self.depth != 32 {
-            log!("FB", "draw_gradient only supports 32bpp for now");
-            return;
-        }
-
-        let width_max = self.width.saturating_sub(1).max(1);
-        let height_max = self.height.saturating_sub(1).max(1);
-
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let r = ((x * 255) / width_max) as u8;
-                let g = ((y * 255) / height_max) as u8;
-                let b = 128u8;
-
-                let color = self.color_rgb(r, g, b);
-                self.put_pixel(x, y, color);
-            }
-        }
-
-        log!("FB", "gradient done");
     }
 }
