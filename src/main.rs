@@ -6,24 +6,31 @@ use core::panic::PanicInfo;
 
 global_asm!(include_str!("arch/aarch64/boot.S"));
 
-mod drivers;
+#[macro_use]
 mod platform;
+mod drivers;
 
 use crate::drivers::framebuffer::Framebuffer;
-use crate::platform::uart::{uart_init, uart_write_str};
+use crate::platform::uart::uart_init;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_main() -> ! {
     uart_init();
-    uart_write_str("Booting...\n");
+
+    log!("BOOT", "Kernel start");
+    log!("FB", "Initializing...");
 
     match Framebuffer::init(1024, 768, 32) {
         Some(mut fb) => {
-            uart_write_str("Framebuffer OK\n");
+            log!("FB", "OK");
+            log!("FB", "Width: {}", fb.width);
+            log!("FB", "Height: {}", fb.height);
+            log!("FB", "Pitch: {}", fb.pitch);
+
             fb.clear(0x0000FF00);
         }
         None => {
-            uart_write_str("Framebuffer FAIL\n");
+            log!("FB", "FAIL");
         }
     }
 
@@ -34,7 +41,7 @@ pub extern "C" fn kernel_main() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    uart_write_str("PANIC!\n");
+    log!("PANIC", "Kernel panic");
     loop {
         core::hint::spin_loop();
     }
