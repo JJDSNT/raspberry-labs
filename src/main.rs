@@ -18,19 +18,15 @@ pub extern "C" fn kernel_main() -> ! {
     uart_init();
 
     log!("BOOT", "Kernel start");
-    log!("FB", "Initializing...");
+    log!("BOOT", "Initializing framebuffer...");
 
     match Framebuffer::init(1024, 768, 32) {
         Some(mut fb) => {
-            log!("FB", "OK");
-            log!("FB", "Width: {}", fb.width);
-            log!("FB", "Height: {}", fb.height);
-            log!("FB", "Pitch: {}", fb.pitch);
-
+            log!("BOOT", "Framebuffer ready");
             fb.clear(0x0000FF00);
         }
         None => {
-            log!("FB", "FAIL");
+            log!("BOOT", "Framebuffer init failed");
         }
     }
 
