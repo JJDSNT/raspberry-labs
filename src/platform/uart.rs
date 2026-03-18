@@ -8,13 +8,13 @@ use crate::platform::mmio::{read, write};
 
 const UART0_BASE: usize = 0x3F201000;
 
-const UART_DR: usize = UART0_BASE + 0x00;
-const UART_FR: usize = UART0_BASE + 0x18;
+const UART_DR:   usize = UART0_BASE + 0x00;
+const UART_FR:   usize = UART0_BASE + 0x18;
 const UART_IBRD: usize = UART0_BASE + 0x24;
 const UART_FBRD: usize = UART0_BASE + 0x28;
 const UART_LCRH: usize = UART0_BASE + 0x2C;
-const UART_CR: usize = UART0_BASE + 0x30;
-const UART_ICR: usize = UART0_BASE + 0x44;
+const UART_CR:   usize = UART0_BASE + 0x30;
+const UART_ICR:  usize = UART0_BASE + 0x44;
 
 const FR_TXFF: u32 = 1 << 5;
 
@@ -60,7 +60,6 @@ pub fn uart_write_str(s: &str) {
 
 pub fn uart_write_hex(value: u32) {
     let hex_chars = b"0123456789ABCDEF";
-
     for i in (0..8).rev() {
         let shift = i * 4;
         let digit = ((value >> shift) & 0xF) as usize;
@@ -126,20 +125,22 @@ pub fn _print(args: fmt::Arguments) {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
-        $crate::platform::uart::_print(format_args!($($arg)*));
+        // fix: ; interno tornava a macro ambígua em posição de expressão.
+        // Envolvemos em bloco com () explícito para garantir tipo () sempre.
+        { $crate::platform::uart::_print(format_args!($($arg)*)); }
     };
 }
 
 #[macro_export]
 macro_rules! println {
     () => {
-        $crate::print!("\n");
+        { $crate::print!("\n"); }
     };
     ($fmt:expr) => {
-        $crate::print!(concat!($fmt, "\n"));
+        { $crate::print!(concat!($fmt, "\n")); }
     };
     ($fmt:expr, $($arg:tt)*) => {
-        $crate::print!(concat!($fmt, "\n"), $($arg)*);
+        { $crate::print!(concat!($fmt, "\n"), $($arg)*); }
     };
 }
 
@@ -150,9 +151,9 @@ macro_rules! println {
 #[macro_export]
 macro_rules! log {
     ($tag:expr, $fmt:expr) => {
-        $crate::println!(concat!("[", $tag, "] ", $fmt));
+        { $crate::println!(concat!("[", $tag, "] ", $fmt)); }
     };
     ($tag:expr, $fmt:expr, $($arg:tt)*) => {
-        $crate::println!(concat!("[", $tag, "] ", $fmt), $($arg)*);
+        { $crate::println!(concat!("[", $tag, "] ", $fmt), $($arg)*); }
     };
 }
