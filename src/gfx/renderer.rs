@@ -3,37 +3,57 @@
 // Renderer — orquestrador de frames para o demo engine bare-metal (aarch64 / RPi)
 // Coordena framebuffer, blitter e copper para produzir cada frame.
 
-use crate::drivers::framebuffer::{Framebuffer, PixelFormat};
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::drivers::framebuffer::Framebuffer;
 use crate::gfx::blitter::Blitter;
 use crate::gfx::copper::CopperList;
 
 // ---------------------------------------------------------------------------
-// Constantes de display
+// Limites máximos do renderer
+// ---------------------------------------------------------------------------
+//
+// Como estamos em bare metal e não queremos depender de allocator,
+// reservamos buffers estáticos grandes o bastante e usamos apenas a
+// região necessária para a resolução atual.
+
+pub const MAX_WIDTH: usize = 1024;
+pub const MAX_HEIGHT: usize = 768;
+pub const BYTES_PER_PIXEL: usize = 4; // ARGB8888
+pub const MAX_PIXELS: usize = MAX_WIDTH * MAX_HEIGHT;
+pub const FRAMEBUFFER_SIZE: usize = MAX_PIXELS * BYTES_PER_PIXEL;
+
+const COPPER_CAPACITY: usize = 256;
+
+// ---------------------------------------------------------------------------
+// Buffers estáticos (.bss)
 // ---------------------------------------------------------------------------
 
-pub const SCREEN_WIDTH:  usize = 320;
-pub const SCREEN_HEIGHT: usize = 240;
-pub const BYTES_PER_PIXEL: usize = 4; // ARGB8888
-pub const FRAMEBUFFER_SIZE: usize = SCREEN_WIDTH * SCREEN_HEIGHT * BYTES_PER_PIXEL;
+static mut RENDER_BUFFERS: [[u32; MAX_PIXELS]; 2] = [[0; MAX_PIXELS]; 2];
+static RENDERER_TAKEN: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // Double-buffer
 // ---------------------------------------------------------------------------
 
-/// Qual dos dois buffers está sendo exibido agora.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ActiveBuffer {
+enum BufferIndex {
     Front = 0,
-    Back  = 1,
+    Back = 1,
 }
 
-impl ActiveBuffer {
+impl BufferIndex {
     #[inline]
-    pub fn flip(self) -> Self {
+    fn flip(self) -> Self {
         match self {
-            ActiveBuffer::Front => ActiveBuffer::Back,
-            ActiveBuffer::Back  => ActiveBuffer::Front,
+            BufferIndex::Front => BufferIndex::Back,
+            BufferIndex::Back => BufferIndex::Front,
         }
+    }
+
+    #[inline]
+    fn as_usize(self) -> usize {
+        self as usize
     }
 }
 
@@ -42,180 +62,255 @@ impl ActiveBuffer {
 // ---------------------------------------------------------------------------
 
 pub struct Renderer {
-    fb:          Framebuffer,
-    blitter:     Blitter,
-    copper:      CopperList,
+    fb: Framebuffer,
+    blitter: Blitter,
+    copper: CopperList<COPPER_CAPACITY>,
 
-    /// Dois buffers em memória; alternamos a cada frame.
-    buffers:     [[u32; SCREEN_WIDTH * SCREEN_HEIGHT]; 2],
-    active:      ActiveBuffer,
+    /// Buffers máximos estáticos; usamos apenas `pixels` elementos.
+    buffers: &'static mut [[u32; MAX_PIXELS]; 2],
+
+    width: usize,
+    height: usize,
+    pixels: usize,
+
+    /// Buffer onde o próximo frame está sendo desenhado.
+    draw: BufferIndex,
 
     /// Contador de frames desde o boot.
-    pub frame:   u64,
+    frame_count: u64,
 }
 
 impl Renderer {
-    /// Inicializa o renderer e configura o framebuffer via mailbox.
+    /// Inicializa o renderer.
+    ///
+    /// Assume instância única no sistema.
+    /// Uma segunda inicialização gera panic.
     pub fn new(fb: Framebuffer) -> Self {
+        let already_taken = RENDERER_TAKEN.swap(true, Ordering::AcqRel);
+        assert!(!already_taken, "Renderer::new() called more than once");
+
+        let width = fb.width as usize;
+        let height = fb.height as usize;
+        let pixels = width.saturating_mul(height);
+
+        assert!(width > 0, "Renderer width must be > 0");
+        assert!(height > 0, "Renderer height must be > 0");
+        assert!(
+            width <= MAX_WIDTH && height <= MAX_HEIGHT,
+            "Renderer resolution exceeds static buffer capacity"
+        );
+
         Self {
-            blitter:  Blitter::new(SCREEN_WIDTH, SCREEN_HEIGHT),
-            copper:   CopperList::new(),
-            buffers:  [[0u32; SCREEN_WIDTH * SCREEN_HEIGHT]; 2],
-            active:   ActiveBuffer::Back,
-            frame:    0,
             fb,
+            blitter: Blitter::new(width, height),
+            copper: CopperList::new(),
+            // SAFETY:
+            // - `RENDERER_TAKEN` garante instância única.
+            // - Logo só existe um `&'static mut` ativo para os buffers.
+            buffers: unsafe { &mut RENDER_BUFFERS },
+            width,
+            height,
+            pixels,
+            draw: BufferIndex::Back,
+            frame_count: 0,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers de índices
+    // -----------------------------------------------------------------------
+
+    #[inline]
+    fn back_index(&self) -> usize {
+        self.draw.as_usize()
+    }
+
+    #[inline]
+    fn front_index(&self) -> usize {
+        self.draw.flip().as_usize()
+    }
+
+    #[inline]
+    fn back_buffer_full(&mut self) -> &mut [u32; MAX_PIXELS] {
+        &mut self.buffers[self.back_index()]
+    }
+
+    #[inline]
+    fn front_buffer_full(&self) -> &[u32; MAX_PIXELS] {
+        &self.buffers[self.front_index()]
     }
 
     // -----------------------------------------------------------------------
     // API de frame
     // -----------------------------------------------------------------------
 
-    /// Retorna um slice mutável para o back-buffer atual.
+    /// Retorna o back-buffer atual, limitado à resolução ativa.
     #[inline]
     pub fn back_buffer(&mut self) -> &mut [u32] {
-        &mut self.buffers[self.active as usize]
+        let pixels = self.pixels;
+        &mut self.back_buffer_full()[..pixels]
     }
 
-    /// Apaga o back-buffer com a cor fornecida (ARGB).
+    /// Retorna o front-buffer atual (somente leitura), limitado à resolução ativa.
+    #[inline]
+    pub fn front_buffer(&self) -> &[u32] {
+        &self.front_buffer_full()[..self.pixels]
+    }
+
+    /// Limpa o back-buffer com uma cor ARGB.
     #[inline]
     pub fn clear(&mut self, color: u32) {
-        let buf = self.back_buffer();
-        for px in buf.iter_mut() {
-            *px = color;
-        }
+        self.back_buffer().fill(color);
     }
 
-    /// Apaga o back-buffer com preto.
+    /// Limpa o back-buffer com preto opaco.
     #[inline]
     pub fn clear_black(&mut self) {
-        self.clear(0xFF000000);
+        self.clear(0xFF00_0000);
     }
 
-    /// Executa a copper list sobre o back-buffer (efeitos de raster line-by-line).
+    /// Executa a copper list sobre o back-buffer.
     pub fn run_copper(&mut self) {
-        let buf = &mut self.buffers[self.active as usize];
-        self.copper.execute(buf, SCREEN_WIDTH, SCREEN_HEIGHT);
+        let idx = self.back_index();
+        self.copper
+            .execute(&mut self.buffers[idx][..self.pixels], self.width, self.height);
     }
 
-    /// Apresenta o back-buffer: copia para o framebuffer físico e faz flip.
+    /// Apresenta o back-buffer no framebuffer físico e faz flip lógico.
     pub fn present(&mut self) {
-        // Copia o back-buffer para o framebuffer de hardware.
-        let src = &self.buffers[self.active as usize];
-        self.fb.blit_argb(src);
+        let idx = self.back_index();
+        self.fb.blit_argb(&self.buffers[idx][..self.pixels]);
 
-        // Flip: o buffer que acabou de ser enviado torna-se o front.
-        self.active = self.active.flip();
-        self.frame  = self.frame.wrapping_add(1);
+        self.draw = self.draw.flip();
+        self.frame_count = self.frame_count.wrapping_add(1);
     }
 
     // -----------------------------------------------------------------------
-    // Primitivas de desenho (delegam ao Blitter)
+    // Primitivas de desenho
     // -----------------------------------------------------------------------
 
-    /// Desenha um pixel no back-buffer.
     #[inline]
     pub fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
-        if x < SCREEN_WIDTH && y < SCREEN_HEIGHT {
-            self.buffers[self.active as usize][y * SCREEN_WIDTH + x] = color;
+        if x < self.width && y < self.height {
+            let idx = y * self.width + x;
+            self.buffers[self.back_index()][idx] = color;
         }
     }
 
-    /// Lê um pixel do back-buffer.
     #[inline]
     pub fn get_pixel(&self, x: usize, y: usize) -> u32 {
-        if x < SCREEN_WIDTH && y < SCREEN_HEIGHT {
-            self.buffers[self.active as usize][y * SCREEN_WIDTH + x]
+        if x < self.width && y < self.height {
+            self.buffers[self.back_index()][y * self.width + x]
         } else {
             0
         }
     }
 
-    /// Linha horizontal rápida via blitter.
     pub fn hline(&mut self, y: usize, x0: usize, x1: usize, color: u32) {
-        let buf = &mut self.buffers[self.active as usize];
-        self.blitter.hline(buf, y, x0, x1, color);
+        let idx = self.back_index();
+        self.blitter
+            .hline(&mut self.buffers[idx][..self.pixels], y, x0, x1, color);
     }
 
-    /// Linha vertical rápida via blitter.
     pub fn vline(&mut self, x: usize, y0: usize, y1: usize, color: u32) {
-        let buf = &mut self.buffers[self.active as usize];
-        self.blitter.vline(buf, x, y0, y1, color);
+        let idx = self.back_index();
+        self.blitter
+            .vline(&mut self.buffers[idx][..self.pixels], x, y0, y1, color);
     }
 
-    /// Retângulo preenchido.
     pub fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
-        let buf = &mut self.buffers[self.active as usize];
-        self.blitter.fill_rect(buf, x, y, w, h, color);
+        let idx = self.back_index();
+        self.blitter
+            .fill_rect(&mut self.buffers[idx][..self.pixels], x, y, w, h, color);
     }
 
-    /// Copia um sprite (ARGB, com alpha) para o back-buffer.
     pub fn blit_sprite(
         &mut self,
         sprite: &[u32],
-        sw: usize, sh: usize,
-        dx: usize, dy: usize,
+        sw: usize,
+        sh: usize,
+        dx: usize,
+        dy: usize,
     ) {
-        let buf = &mut self.buffers[self.active as usize];
-        self.blitter.blit_alpha(buf, sprite, sw, sh, dx, dy, SCREEN_WIDTH, SCREEN_HEIGHT);
+        let idx = self.back_index();
+        self.blitter.blit_alpha(
+            &mut self.buffers[idx][..self.pixels],
+            sprite,
+            sw,
+            sh,
+            dx,
+            dy,
+            self.width,
+            self.height,
+        );
     }
 
     // -----------------------------------------------------------------------
-    // Efeitos de tela cheia
+    // Efeitos fullscreen
     // -----------------------------------------------------------------------
 
-    /// Fade out: mistura o back-buffer com preto em `amount` (0–255).
+    /// Escurece o back-buffer em direção ao preto.
+    ///
+    /// amount=0   -> imagem original
+    /// amount=255 -> preto total
     pub fn fade_to_black(&mut self, amount: u8) {
-        let buf = &mut self.buffers[self.active as usize];
-        let a = amount as u32;
-        for px in buf.iter_mut() {
-            let r = ((*px >> 16) & 0xFF) * (255 - a) / 255;
-            let g = ((*px >>  8) & 0xFF) * (255 - a) / 255;
-            let b = ( *px        & 0xFF) * (255 - a) / 255;
-            *px = 0xFF000000 | (r << 16) | (g << 8) | b;
+        let factor = 255u32 - amount as u32;
+        let idx = self.back_index();
+
+        for px in self.buffers[idx][..self.pixels].iter_mut() {
+            let r = ((*px >> 16) & 0xFF) * factor / 255;
+            let g = ((*px >> 8) & 0xFF) * factor / 255;
+            let b = (*px & 0xFF) * factor / 255;
+
+            *px = 0xFF00_0000 | (r << 16) | (g << 8) | b;
         }
     }
 
-    /// Fade in: mistura o back-buffer com preto em `amount` (0–255).
-    /// amount=0 → preto total, amount=255 → imagem original.
+    /// Clareia a partir do preto.
+    ///
+    /// amount=0   -> preto total
+    /// amount=255 -> imagem original
     #[inline]
     pub fn fade_from_black(&mut self, amount: u8) {
         self.fade_to_black(255 - amount);
     }
 
-    /// Motion blur leve: mistura back com front (ghosting/trail).
+    /// Mistura o frame atual com o anterior para produzir ghosting/trail.
+    ///
+    /// `blend` é o peso do frame novo:
+    /// - 255 => quase só frame atual
+    /// - 0   => quase só frame anterior
     pub fn motion_blur(&mut self, blend: u8) {
-        let front_idx = self.active.flip() as usize;
-        let back_idx  = self.active       as usize;
+        let keep_new = blend as u32;
+        let keep_old = 255u32 - keep_new;
 
-        // SAFETY: acessamos índices distintos do array.
-        let (front, back) = if front_idx < back_idx {
-            let (a, b) = self.buffers.split_at_mut(back_idx);
-            (&a[front_idx], &mut b[0])
+        let front_idx = self.front_index();
+        let back_idx = self.back_index();
+        let pixels = self.pixels;
+
+        let (front, back): (&[u32; MAX_PIXELS], &mut [u32; MAX_PIXELS]) = if front_idx < back_idx {
+            let (lo, hi) = self.buffers.split_at_mut(back_idx);
+            (&lo[front_idx], &mut hi[0])
         } else {
-            let (a, b) = self.buffers.split_at_mut(front_idx);
-            (&b[0], &mut a[back_idx])
+            let (lo, hi) = self.buffers.split_at_mut(front_idx);
+            (&hi[0], &mut lo[back_idx])
         };
 
-        let a = blend as u32;
-        for (dst, &src) in back.iter_mut().zip(front.iter()) {
-            let mix = |ch_dst: u32, ch_src: u32| -> u32 {
-                (ch_dst * a + ch_src * (255 - a)) / 255
-            };
-            let r = mix((*dst >> 16) & 0xFF, (src >> 16) & 0xFF);
-            let g = mix((*dst >>  8) & 0xFF, (src >>  8) & 0xFF);
-            let b = mix( *dst        & 0xFF,  src        & 0xFF);
-            *dst = 0xFF000000 | (r << 16) | (g << 8) | b;
+        for (dst, src) in back[..pixels].iter_mut().zip(front[..pixels].iter()) {
+            let r = (((*dst >> 16) & 0xFF) * keep_new + ((src >> 16) & 0xFF) * keep_old) / 255;
+            let g = (((*dst >> 8) & 0xFF) * keep_new + ((src >> 8) & 0xFF) * keep_old) / 255;
+            let b = ((*dst & 0xFF) * keep_new + (src & 0xFF) * keep_old) / 255;
+
+            *dst = 0xFF00_0000 | (r << 16) | (g << 8) | b;
         }
     }
 
     // -----------------------------------------------------------------------
-    // Helpers de copper
+    // Copper
     // -----------------------------------------------------------------------
 
-    /// Expõe a copper list para que demos possam programar efeitos de raster.
     #[inline]
-    pub fn copper_mut(&mut self) -> &mut CopperList {
+    pub fn copper_mut(&mut self) -> &mut CopperList<COPPER_CAPACITY> {
         &mut self.copper
     }
 
@@ -224,9 +319,22 @@ impl Renderer {
     // -----------------------------------------------------------------------
 
     #[inline]
-    pub fn width(&self)  -> usize { SCREEN_WIDTH  }
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
     #[inline]
-    pub fn height(&self) -> usize { SCREEN_HEIGHT }
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
     #[inline]
-    pub fn frame(&self)  -> u64   { self.frame    }
+    pub fn pixels(&self) -> usize {
+        self.pixels
+    }
+
+    #[inline]
+    pub fn frame(&self) -> u64 {
+        self.frame_count
+    }
 }

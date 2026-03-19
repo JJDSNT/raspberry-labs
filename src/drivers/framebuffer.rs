@@ -1,3 +1,5 @@
+// src/drivers/framebuffer.rs
+
 use core::ptr::{addr_of_mut, read_volatile, write_volatile};
 
 use crate::log;
@@ -29,7 +31,7 @@ impl Framebuffer {
 
             let m = addr_of_mut!(MBOX.data) as *mut u32;
 
-            // 40 words = 160 bytes (FIX: era 39 * 4, faltava o último word)
+            // 40 words = 160 bytes
             write_volatile(m.add(0), 40 * 4);
             write_volatile(m.add(1), 0);
 
@@ -70,7 +72,6 @@ impl Framebuffer {
             write_volatile(m.add(25), 0x0004_0001);
             write_volatile(m.add(26), 8);
             write_volatile(m.add(27), 8);
-            // FIX: alinhamento 4096 (era 16). O GPU escreve o endereço aqui na resposta.
             write_volatile(m.add(28), 4096);
             write_volatile(m.add(29), 0);
 
@@ -88,7 +89,6 @@ impl Framebuffer {
 
             // end tag
             write_volatile(m.add(38), 0);
-            // FIX: padding para completar os 40 words
             write_volatile(m.add(39), 0);
 
             log!("FB", "calling mailbox...");
@@ -99,8 +99,6 @@ impl Framebuffer {
 
             log!("FB", "mailbox returned");
 
-            // FIX: o GPU escreve o endereço do framebuffer no índice 28 (não 29).
-            // O índice 29 é o tamanho alocado, não o ponteiro.
             let fb_ptr = read_volatile(m.add(28)) & 0x3FFF_FFFF;
             let pitch = read_volatile(m.add(33));
             let isrgb = read_volatile(m.add(37));
@@ -146,6 +144,15 @@ impl Framebuffer {
         y as usize * self.pitch as usize + x as usize * self.bytes_per_pixel()
     }
 
+    #[inline(always)]
+    fn decode_argb(argb: u32) -> (u8, u8, u8, u8) {
+        let a = ((argb >> 24) & 0xFF) as u8;
+        let r = ((argb >> 16) & 0xFF) as u8;
+        let g = ((argb >> 8) & 0xFF) as u8;
+        let b = (argb & 0xFF) as u8;
+        (a, r, g, b)
+    }
+
     pub fn put_pixel(&mut self, x: u32, y: u32, color: u32) {
         if x >= self.width || y >= self.height {
             return;
@@ -162,7 +169,42 @@ impl Framebuffer {
         }
     }
 
-    // FIX: simplificado — delega para fill_rect evitando duplicação
+    /// Copia um frame ARGB8888 linear para o framebuffer físico.
+    ///
+    /// O alpha é ignorado na saída final; usamos apenas RGB.
+    /// O formato final gravado respeita `isrgb` através de `color_rgb()`.
+    pub fn blit_argb(&mut self, src: &[u32]) {
+        if self.depth != 32 {
+            log!("FB", "blit_argb only supports 32bpp for now");
+            return;
+        }
+
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let needed = width * height;
+
+        if src.len() < needed {
+            log!("FB", "blit_argb source too small: {} < {}", src.len(), needed);
+            return;
+        }
+
+        for y in 0..height {
+            let dst_row = unsafe {
+                self.ptr.add(y * self.pitch as usize) as *mut u32
+            };
+            let src_row = &src[y * width..(y + 1) * width];
+
+            for x in 0..width {
+                let (_, r, g, b) = Self::decode_argb(src_row[x]);
+                let hw_color = self.color_rgb(r, g, b);
+
+                unsafe {
+                    write_volatile(dst_row.add(x), hw_color);
+                }
+            }
+        }
+    }
+
     pub fn clear(&mut self, color: u32) {
         log!("FB", "clear color=0x{:08X}", color);
         self.fill_rect(0, 0, self.width, self.height, color);
@@ -180,7 +222,6 @@ impl Framebuffer {
         let x1 = x.saturating_add(w).min(self.width);
         let y1 = y.saturating_add(h).min(self.height);
 
-        // FIX: removidos os casts `as u32` redundantes/ambíguos
         for yy in y0..y1 {
             let row = unsafe { self.ptr.add(yy as usize * self.pitch as usize) as *mut u32 };
             for xx in x0..x1 {
