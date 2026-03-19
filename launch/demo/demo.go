@@ -20,6 +20,7 @@ var All = []Config{
 	{Name: "Starfield", Description: "Campo de estrelas 3D em perspectiva", BootArg: "starfield"},
 	{Name: "Plasma", Description: "Efeito plasma com tabela de senos", BootArg: "plasma"},
 	{Name: "Flame", Description: "Simulação de fogo procedural", BootArg: "flame"},
+	{Name: "Tunnel", Description: "Túnel livre com textura e interpolação 8x8", BootArg: "tunnel"},
 }
 
 const (
