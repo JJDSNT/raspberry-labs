@@ -18,13 +18,14 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig) {
         match key {
             "demo" => {
                 config.demo = match value {
-                    "gradient" => DemoKind::Gradient,
+                    "gradient"    => DemoKind::Gradient,
                     "testpattern" => DemoKind::TestPattern,
-                    "rasterbars" => DemoKind::RasterBars,
-                    "plasma" => DemoKind::Plasma,
-                    "flame" => DemoKind::Flame,
-                    "starfield" => DemoKind::Starfield,
-                    _ => config.demo, // valor desconhecido: mantém o atual
+                    "rasterbars"  => DemoKind::RasterBars,
+                    "plasma"      => DemoKind::Plasma,
+                    "flame"       => DemoKind::Flame,
+                    "starfield"   => DemoKind::Starfield,
+                    "tunnel"      => DemoKind::Tunnel,
+                    _             => config.demo,
                 };
             }
             "width" => {
@@ -42,7 +43,7 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig) {
                     config.depth = n;
                 }
             }
-            _ => {} // chave desconhecida, ignora silenciosamente
+            _ => {}
         }
     }
 }
@@ -59,7 +60,6 @@ fn parse_u32(s: &str) -> Option<u32> {
         if !b.is_ascii_digit() {
             return None;
         }
-
         result = result.checked_mul(10)?.checked_add((b - b'0') as u32)?;
     }
 

@@ -31,7 +31,6 @@ impl Framebuffer {
 
             let m = addr_of_mut!(MBOX.data) as *mut u32;
 
-            // 40 words = 160 bytes
             write_volatile(m.add(0), 40 * 4);
             write_volatile(m.add(1), 0);
 
@@ -100,12 +99,23 @@ impl Framebuffer {
             log!("FB", "mailbox returned");
 
             let fb_ptr = read_volatile(m.add(28)) & 0x3FFF_FFFF;
-            let pitch = read_volatile(m.add(33));
-            let isrgb = read_volatile(m.add(37));
+            let pitch   = read_volatile(m.add(33));
+            let isrgb_reported = read_volatile(m.add(37));
 
             log!("FB", "fb_ptr=0x{:08X}", fb_ptr);
             log!("FB", "pitch={}", pitch);
-            log!("FB", "isrgb={}", isrgb);
+            log!("FB", "isrgb reported by mailbox={}", isrgb_reported);
+
+            // O VideoCore IV do Pi 3B reporta isrgb=0 (BGR) mesmo quando
+            // pedimos RGB explicitamente (tag 0x48006 com valor 1).
+            // Na prática o hardware escreve em formato BGR32 (0xXX_BB_GG_RR).
+            // Forçamos isrgb=0 aqui para que color_rgb() faça a troca correta
+            // e os bytes cheguem na ordem certa no framebuffer físico.
+            //
+            // Se o seu display mostrar cores invertidas (vermelho aparece azul),
+            // troque para isrgb=1 abaixo.
+            let isrgb: u32 = 0;
+            log!("FB", "isrgb forced={}", isrgb);
 
             if fb_ptr == 0 || pitch == 0 {
                 log!("FB", "invalid framebuffer response");
@@ -128,13 +138,22 @@ impl Framebuffer {
         (self.depth / 8) as usize
     }
 
+    /// Converte (r, g, b) para o formato nativo do framebuffer físico.
+    ///
+    /// Pi 3B / VideoCore IV:
+    ///   isrgb=0 → hardware espera BGR32  (byte order: B G R X)
+    ///   isrgb=1 → hardware espera RGB32  (byte order: R G B X)
+    ///
+    /// A palavra de 32 bits é escrita com write_volatile em little-endian,
+    /// então o byte menos significativo vai para o endereço mais baixo.
+    /// BGR32: palavra = 0x00_RR_GG_BB → byte 0=BB, 1=GG, 2=RR, 3=00 ✓
     #[inline(always)]
     pub fn color_rgb(&self, r: u8, g: u8, b: u8) -> u32 {
         if self.isrgb != 0 {
-            // XRGB
+            // RGB32: 0x00_RR_GG_BB no registrador → R no byte alto
             ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         } else {
-            // XBGR
+            // BGR32: 0x00_BB_GG_RR no registrador → B no byte alto
             ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
         }
     }
@@ -148,38 +167,27 @@ impl Framebuffer {
     fn decode_argb(argb: u32) -> (u8, u8, u8, u8) {
         let a = ((argb >> 24) & 0xFF) as u8;
         let r = ((argb >> 16) & 0xFF) as u8;
-        let g = ((argb >> 8) & 0xFF) as u8;
+        let g = ((argb >> 8)  & 0xFF) as u8;
         let b = (argb & 0xFF) as u8;
         (a, r, g, b)
     }
 
     pub fn put_pixel(&mut self, x: u32, y: u32, color: u32) {
-        if x >= self.width || y >= self.height {
-            return;
-        }
-
-        if self.depth != 32 {
-            log!("FB", "put_pixel only supports 32bpp for now");
-            return;
-        }
-
+        if x >= self.width || y >= self.height { return; }
+        if self.depth != 32 { return; }
         let offset = self.pixel_offset(x, y);
-        unsafe {
-            write_volatile(self.ptr.add(offset) as *mut u32, color);
-        }
+        unsafe { write_volatile(self.ptr.add(offset) as *mut u32, color); }
     }
 
     /// Copia um frame ARGB8888 linear para o framebuffer físico.
-    ///
-    /// O alpha é ignorado na saída final; usamos apenas RGB.
-    /// O formato final gravado respeita `isrgb` através de `color_rgb()`.
+    /// O canal alpha é descartado; R/G/B são convertidos para o formato do hw.
     pub fn blit_argb(&mut self, src: &[u32]) {
         if self.depth != 32 {
-            log!("FB", "blit_argb only supports 32bpp for now");
+            log!("FB", "blit_argb only supports 32bpp");
             return;
         }
 
-        let width = self.width as usize;
+        let width  = self.width as usize;
         let height = self.height as usize;
         let needed = width * height;
 
@@ -197,10 +205,7 @@ impl Framebuffer {
             for x in 0..width {
                 let (_, r, g, b) = Self::decode_argb(src_row[x]);
                 let hw_color = self.color_rgb(r, g, b);
-
-                unsafe {
-                    write_volatile(dst_row.add(x), hw_color);
-                }
+                unsafe { write_volatile(dst_row.add(x), hw_color); }
             }
         }
     }
@@ -212,10 +217,7 @@ impl Framebuffer {
     }
 
     pub fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: u32) {
-        if self.depth != 32 {
-            log!("FB", "fill_rect only supports 32bpp for now");
-            return;
-        }
+        if self.depth != 32 { return; }
 
         let x0 = x.min(self.width);
         let y0 = y.min(self.height);
@@ -223,39 +225,31 @@ impl Framebuffer {
         let y1 = y.saturating_add(h).min(self.height);
 
         for yy in y0..y1 {
-            let row = unsafe { self.ptr.add(yy as usize * self.pitch as usize) as *mut u32 };
+            let row = unsafe {
+                self.ptr.add(yy as usize * self.pitch as usize) as *mut u32
+            };
             for xx in x0..x1 {
-                unsafe {
-                    write_volatile(row.add(xx as usize), color);
-                }
+                unsafe { write_volatile(row.add(xx as usize), color); }
             }
         }
     }
 
     pub fn draw_gradient(&mut self) {
         log!("FB", "drawing gradient");
+        if self.depth != 32 { return; }
 
-        if self.depth != 32 {
-            log!("FB", "draw_gradient only supports 32bpp for now");
-            return;
-        }
-
-        let width_max = self.width.saturating_sub(1).max(1);
+        let width_max  = self.width.saturating_sub(1).max(1);
         let height_max = self.height.saturating_sub(1).max(1);
 
         for y in 0..self.height {
-            let row = unsafe { self.ptr.add(y as usize * self.pitch as usize) as *mut u32 };
-
+            let row = unsafe {
+                self.ptr.add(y as usize * self.pitch as usize) as *mut u32
+            };
             for x in 0..self.width {
-                let r = ((x * 255) / width_max) as u8;
+                let r = ((x * 255) / width_max)  as u8;
                 let g = ((y * 255) / height_max) as u8;
                 let b = 128u8;
-
-                let color = self.color_rgb(r, g, b);
-
-                unsafe {
-                    write_volatile(row.add(x as usize), color);
-                }
+                unsafe { write_volatile(row.add(x as usize), self.color_rgb(r, g, b)); }
             }
         }
 
@@ -265,16 +259,15 @@ impl Framebuffer {
     pub fn test_pattern(&mut self) {
         log!("FB", "drawing test pattern");
 
-        let black = self.color_rgb(0, 0, 0);
-        let red = self.color_rgb(255, 0, 0);
-        let green = self.color_rgb(0, 255, 0);
-        let blue = self.color_rgb(0, 0, 255);
+        let black = self.color_rgb(0,   0,   0  );
+        let red   = self.color_rgb(255, 0,   0  );
+        let green = self.color_rgb(0,   255, 0  );
+        let blue  = self.color_rgb(0,   0,   255);
         let white = self.color_rgb(255, 255, 255);
 
         self.clear(black);
-
-        self.fill_rect(0, 0, self.width / 3, self.height, red);
-        self.fill_rect(self.width / 3, 0, self.width / 3, self.height, green);
+        self.fill_rect(0,                    0, self.width / 3, self.height, red);
+        self.fill_rect(self.width / 3,       0, self.width / 3, self.height, green);
         self.fill_rect((self.width / 3) * 2, 0, self.width / 3, self.height, blue);
 
         let cx = self.width / 2;
