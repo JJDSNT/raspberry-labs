@@ -1,142 +1,136 @@
 // src/demos/flame.rs
-//
-// Efeito de fogo / chama em software, estilo clássico.
-// Usa um buffer de intensidades e uma paleta ARGB.
-//
-// Compatível com o renderer dinâmico e com o trait `Demo`.
 
 use crate::demos::Demo;
 use crate::gfx::renderer::{MAX_HEIGHT, MAX_WIDTH, Renderer};
 
-const MAX_PIXELS: usize = MAX_WIDTH * MAX_HEIGHT;
+// 8 linhas extras afastam a fornalha da área visível — o calor decai
+// naturalmente antes de chegar à última linha renderizada.
+const EXTRA_ROWS: usize = 8;
+const MAX_HEAT: usize = MAX_WIDTH * (MAX_HEIGHT + 8); // EXTRA_ROWS máximo
 const FIRE_LEVELS: usize = 256;
 
-/// Demo de fogo.
+// Calibração: heat real na tela fica em ~0..220
+const HEAT_MAX: u32 = 220;
+
+// Fornalha
+const FURNACE_BASE_MIN: u32 = 100;
+const FURNACE_BASE_RND: u32 = 80;
+const FURNACE_SPARK: u8 = 220;
+
+struct Lcg(u32);
+impl Lcg {
+    #[inline] fn next(&mut self) -> u32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.0
+    }
+    #[inline] fn next_mod(&mut self, n: u32) -> u32 {
+        if n == 0 { return 0; }
+        self.next() % n
+    }
+}
+
 pub struct FlameDemo {
-    heat: [u8; MAX_PIXELS],
+    heat:    [u8;  MAX_HEAT],
     palette: [u32; FIRE_LEVELS],
-    tick: u32,
-    seeded: bool,
+    rng:     Lcg,
+    seeded:  bool,
 }
 
 impl FlameDemo {
     pub fn new() -> Self {
         let mut demo = Self {
-            heat: [0; MAX_PIXELS],
+            heat:    [0; MAX_HEAT],
             palette: [0; FIRE_LEVELS],
-            tick: 0,
-            seeded: false,
+            rng:     Lcg(0xCAFE_BABE),
+            seeded:  false,
         };
-
         demo.build_palette();
         demo
     }
 
     pub fn render(&mut self, renderer: &mut Renderer) {
-        let width = renderer.width();
-        let height = renderer.height();
-        let pixels = width * height;
-
-        if width == 0 || height == 0 {
-            return;
-        }
-
+        let w = renderer.width().min(MAX_WIDTH);
+        let h = renderer.height().min(MAX_HEIGHT);
+        if w == 0 || h == 0 { return; }
         if !self.seeded {
-            self.clear_heat(pixels);
+            self.heat[..w * (h + EXTRA_ROWS)].fill(0);
             self.seeded = true;
         }
-
-        self.inject_base(width, height);
-        self.propagate(width, height);
-
-        let buf = renderer.back_buffer();
-        for i in 0..pixels {
-            buf[i] = self.palette[self.heat[i] as usize];
-        }
-
-        self.tick = self.tick.wrapping_add(1);
+        self.feed_furnace(w, h);
+        self.propagate(w, h);
+        self.draw(renderer, w, h);
     }
 
-    fn clear_heat(&mut self, pixels: usize) {
-        self.heat[..pixels].fill(0);
-    }
-
-    fn inject_base(&mut self, width: usize, height: usize) {
-        let last_row = height - 1;
-        let row_start = last_row * width;
-
-        for x in 0..width {
-            let idx = row_start + x;
-
-            // Base do fogo com pequenas variações pseudo-periódicas.
-            let phase = ((x as u32)
-                .wrapping_mul(13)
-                .wrapping_add(self.tick.wrapping_mul(7)))
-                & 31;
-
-            let value = if phase < 24 { 255 } else { 200 };
-            self.heat[idx] = value as u8;
+    fn feed_furnace(&mut self, w: usize, h: usize) {
+        let base = h * w;
+        for x in 0..w {
+            let v = FURNACE_BASE_MIN + self.rng.next_mod(FURNACE_BASE_RND);
+            self.heat[base + x] = v.min(255) as u8;
         }
-    }
-
-    fn propagate(&mut self, width: usize, height: usize) {
-        if height < 2 || width < 2 {
-            return;
-        }
-
-        // Atualiza de baixo para cima, ignorando a última linha
-        // (que é a fonte do fogo).
-        for y in 1..height {
-            let row = y * width;
-            let dst_row = (y - 1) * width;
-
-            for x in 0..width {
-                let src_idx = row + x;
-                let src = self.heat[src_idx] as u16;
-
-                // Pequena variação horizontal determinística.
-                let noise = ((x as u32)
-                    .wrapping_mul(17)
-                    .wrapping_add(y as u32 * 31)
-                    .wrapping_add(self.tick * 13))
-                    & 3;
-
-                let decay = 1 + (noise as u16);
-                let cooled = src.saturating_sub(decay as u16) as u8;
-
-                let dst_x = x.saturating_sub(noise as usize >> 1);
-                let dst_idx = dst_row + dst_x.min(width - 1);
-
-                self.heat[dst_idx] = cooled;
+        let num_sparks = 30 + self.rng.next_mod(40);
+        for _ in 0..num_sparks {
+            if w < 3 { break; }
+            let pos = self.rng.next_mod((w - 3) as u32) as usize;
+            for dy in 0..3usize {
+                let row = (h + 1 + dy) * w;
+                for dx in 0..3usize {
+                    let idx = row + pos + dx;
+                    if idx < MAX_HEAT { self.heat[idx] = FURNACE_SPARK; }
+                }
             }
         }
     }
 
+    fn propagate(&mut self, w: usize, h: usize) {
+        let count = w * (h + 2) - 2;
+        for i in 0..count {
+            let s = 2 * w + i;
+            let d = w + i;
+            if s + 2 * w + 1 >= MAX_HEAT { break; }
+            let avg = (self.heat[s + w]       as u32
+                     + self.heat[s + 2*w - 1] as u32
+                     + self.heat[s + 2*w]     as u32
+                     + self.heat[s + 2*w + 1] as u32) >> 2;
+            self.heat[d] = if avg > 0 { (avg - 1) as u8 } else { 0 };
+        }
+    }
+
+    fn draw(&self, renderer: &mut Renderer, w: usize, h: usize) {
+        let buf = renderer.back_buffer();
+        for i in 0..(w * h).min(buf.len()) {
+            buf[i] = self.palette[self.heat[i] as usize];
+        }
+    }
+
+    // Paleta fiel ao Amiga original (init_colormap).
+    // O azul aparece em duas regiões:
+    //   i < 8   → azul crescente (índices muito baixos, bordas frias)
+    //   i > 57  → azul crescente de novo (depois do amarelo → branco azulado)
+    // Isso produz o efeito da foto 3: bordas das chamas com toque azul.
+    //
+    // Remapeamos i → t = i * 255 / HEAT_MAX para cobrir a faixa real de calor.
     fn build_palette(&mut self) {
         for i in 0..FIRE_LEVELS {
-            let c = i as u8;
+            // Remapeia para a faixa real de calor
+            let v = ((i as u32) * 255 / HEAT_MAX).min(255);
 
-            let color = if c < 64 {
-                // preto -> vermelho
-                argb(0xFF, c.saturating_mul(4), 0, 0)
-            } else if c < 128 {
-                // vermelho -> laranja
-                let t = c - 64;
-                argb(0xFF, 255, t.saturating_mul(4), 0)
-            } else if c < 192 {
-                // laranja -> amarelo
-                let t = c - 128;
-                argb(0xFF, 255, 255, t.saturating_mul(4))
-            } else {
-                // amarelo -> branco
-                let t = c - 192;
-                let boost = t.saturating_mul(4);
-                argb(0xFF, 255, 255, 255u8.saturating_sub(63 - boost.min(63)))
-            };
+            // Paleta original do Amiga aplicada sobre v
+            let r = if v > 7 && v < 32 { 10 * (v - 7) }
+                    else if v >= 32     { 255 }
+                    else                { 0 };
 
-            self.palette[i] = color;
+            let g = if v > 32 && v < 57 { 10 * (v - 32) }
+                    else if v >= 57      { 255 }
+                    else                 { 0 };
+
+            let b = if v < 8                    { 8 * v }
+                    else if v >= 8 && v < 17    { 8 * (16 - v) }
+                    else if v > 57 && v < 82    { 10 * (v - 57) }
+                    else if v >= 82             { 255 }
+                    else                        { 0 };
+
+            self.palette[i] = argb(0xFF, r.min(255) as u8, g.min(255) as u8, b.min(255) as u8);
         }
-
         self.palette[0] = argb(0xFF, 0, 0, 0);
     }
 }
@@ -149,8 +143,5 @@ impl Demo for FlameDemo {
 
 #[inline]
 fn argb(a: u8, r: u8, g: u8, b: u8) -> u32 {
-    ((a as u32) << 24)
-        | ((r as u32) << 16)
-        | ((g as u32) << 8)
-        | (b as u32)
+    ((a as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
