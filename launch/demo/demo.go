@@ -113,7 +113,7 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 		return fmt.Errorf("DTB patch: %w", err)
 	}
 
-	return runQEMU(kernelPath(), patched, display)
+	return runQEMU(kernelPath(), patched, display, screen)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,14 +201,25 @@ func patchDTB(base, patched, bootargs string) error {
 // QEMU
 // ---------------------------------------------------------------------------
 
-func runQEMU(kernel, dtb string, display DisplayMode) error {
+func runQEMU(kernel, dtb string, display DisplayMode, screen ScreenOption) error {
+	// Limitação do QEMU raspi3b: o display SDL tem tamanho fixo 640x480.
+	// Para outras resoluções, GTK é o único display que escala corretamente.
+	// Se o usuário escolheu SDL mas a resolução não é 640x480, avisa e usa GTK.
+	effectiveDisplay := display
+	if display == DisplaySDL && (screen.Width != 640 || screen.Height != 480) {
+		fmt.Fprintf(os.Stderr,
+			"[WARN] SDL não suporta %dx%d no raspi3b emulado — usando GTK\n",
+			screen.Width, screen.Height)
+		effectiveDisplay = DisplayGTK
+	}
+
 	args := []string{
 		"-M", "raspi3b",
 		"-cpu", "cortex-a53",
 		"-kernel", kernel,
 		"-dtb", dtb,
 		"-serial", "stdio",
-		"-display", string(display),
+		"-display", string(effectiveDisplay),
 	}
 
 	cmd := exec.Command("qemu-system-aarch64", args...)
