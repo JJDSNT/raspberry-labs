@@ -149,20 +149,6 @@ impl Scheduler {
     // -----------------------------------------------------------------------
 
     pub fn handle_svc(&mut self, svc_num: u64, ctx: &mut ExceptionContext) {
-        for i in 0..self.task_count {
-            if let Some(t) = &self.tasks[i] {
-                crate::log!(
-                    "SVC",
-                    "  slot={} id={} state={:?} idle={}",
-                    i,
-                    t.id.0,
-                    t.state,
-                    t.is_idle
-                );
-            }
-        }
-        // --- fim diagnóstico ---
-
         match svc_num {
             SVC_BOOT => {
                 // Primeiro dispatch — escolhe a primeira task pronta.
@@ -192,16 +178,7 @@ impl Scheduler {
                 };
 
                 let next_state = match svc_num {
-                    SVC_YIELD => {
-                        if !self.tasks[current_idx].as_ref().unwrap().is_idle {
-                            crate::log!(
-                                "SCHED",
-                                "task id={} yielding",
-                                self.tasks[current_idx].as_ref().unwrap().id.0
-                            );
-                        }
-                        TaskState::Ready
-                    }
+                    SVC_YIELD => TaskState::Ready,
                     SVC_SLEEP => {
                         crate::log!(
                             "SCHED",
@@ -248,7 +225,6 @@ impl Scheduler {
                 let new_frame = {
                     let next = self.tasks[next_idx].as_mut().unwrap();
                     next.state = TaskState::Running;
-                    crate::log!("SCHED", "switching task id={} -> id={}", old_id, next.id.0);
                     next.frame
                 };
 
@@ -296,7 +272,6 @@ impl Scheduler {
         let new_frame = {
             let next = self.tasks[next_idx].as_mut().unwrap();
             next.state = TaskState::Running;
-            crate::log!("SCHED", "preempt task id={} -> id={}", old_id, next.id.0);
             next.frame
         };
 

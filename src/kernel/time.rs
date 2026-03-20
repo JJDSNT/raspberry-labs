@@ -19,9 +19,9 @@ static TICKS_PER_SECOND: AtomicU64 = AtomicU64::new(0);
 /// Inicializa o sistema de tempo.
 /// Deve ser chamado durante o boot, após configurar o timer.
 /// `ticks_per_second` normalmente vem de CNTFRQ_EL0 (ex: 62_500_000).
-pub fn init(ticks_per_second: u64) {
+pub fn init(cntfrq: u64, tick_hz: u64) {
     TICKS.store(0, Ordering::Relaxed);
-    TICKS_PER_SECOND.store(ticks_per_second, Ordering::Relaxed);
+    TICKS_PER_SECOND.store(tick_hz, Ordering::Relaxed);
 }
 
 /// Retorna o número de ticks desde o boot.

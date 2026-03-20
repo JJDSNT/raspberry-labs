@@ -69,7 +69,7 @@ fn early_arch_init() {
     );
 
     crate::log!("BOOT", "early_arch_init: kernel time");
-    crate::kernel::time::init(cntfrq);
+    crate::kernel::time::init(cntfrq, 100);
 
     crate::log!("BOOT", "early_arch_init: irq enable");
     crate::arch::aarch64::exception::enable_interrupts();
