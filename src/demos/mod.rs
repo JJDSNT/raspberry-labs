@@ -4,6 +4,7 @@ pub mod plasma;
 pub mod rasterbars;
 pub mod scroller;
 pub mod tunnel;
+pub mod parallax;
 
 use crate::drivers::framebuffer::Framebuffer;
 use crate::gfx::renderer::Renderer;
@@ -21,6 +22,7 @@ pub enum DemoKind {
     Flame,
     Starfield,
     Tunnel,
+    Parallax,
 }
 
 impl DemoKind {
@@ -33,6 +35,7 @@ impl DemoKind {
             DemoKind::Flame       => "Flame",
             DemoKind::Starfield   => "Starfield",
             DemoKind::Tunnel      => "Tunnel",
+            DemoKind::Parallax    => "Parallax",
         }
     }
 }
@@ -46,6 +49,7 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
         DemoKind::Flame       => run_renderer_demo(fb, flame::FlameDemo::new()),
         DemoKind::Starfield   => run_renderer_demo(fb, starfield::StarfieldDemo::new()),
         DemoKind::Tunnel      => run_renderer_demo(fb, tunnel::TunnelDemo::new()),
+        DemoKind::Parallax    => run_renderer_demo(fb, parallax::ParallaxDemo::new()),
     }
 }
 

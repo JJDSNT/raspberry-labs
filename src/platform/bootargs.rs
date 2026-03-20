@@ -25,6 +25,7 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig) {
                     "flame"       => DemoKind::Flame,
                     "starfield"   => DemoKind::Starfield,
                     "tunnel"      => DemoKind::Tunnel,
+                    "parallax"    => DemoKind::Parallax,
                     _             => config.demo,
                 };
             }
