@@ -7,6 +7,8 @@ pub mod smpte;
 use crate::demos::Demo;
 use crate::drivers::framebuffer::Framebuffer;
 use crate::gfx::renderer::Renderer;
+use crate::kernel::time;
+use crate::media::MediaClock;
 
 #[derive(Clone, Copy, Debug)]
 pub enum DiagKind {
@@ -35,8 +37,15 @@ pub fn run_diag(kind: DiagKind, fb: Framebuffer) -> ! {
 
 fn run_renderer_demo<D: Demo>(fb: Framebuffer, mut diag: D) -> ! {
     let mut renderer = Renderer::new(fb);
+
+    let ticks_per_second = time::ticks_per_second();
+    assert!(ticks_per_second != 0, "kernel time not initialized");
+
+    let mut clock = MediaClock::new(ticks_per_second, 60);
+
     loop {
-        diag.render(&mut renderer);
+        let frame = clock.begin_frame();
+        diag.render(&mut renderer, &frame);
         renderer.present();
     }
 }

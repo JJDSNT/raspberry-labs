@@ -2,6 +2,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 pub struct TestPatternDiag;
 
@@ -12,7 +13,7 @@ impl TestPatternDiag {
 }
 
 impl Demo for TestPatternDiag {
-    fn render(&mut self, renderer: &mut Renderer) {
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let w = renderer.width();
         let h = renderer.height();
         let buf = renderer.back_buffer();

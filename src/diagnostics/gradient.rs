@@ -2,6 +2,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 pub struct GradientDiag;
 
@@ -12,7 +13,7 @@ impl GradientDiag {
 }
 
 impl Demo for GradientDiag {
-    fn render(&mut self, renderer: &mut Renderer) {
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let w = renderer.width();
         let h = renderer.height();
         let width_max  = (w - 1).max(1);

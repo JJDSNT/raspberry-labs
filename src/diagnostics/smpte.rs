@@ -19,6 +19,7 @@ use crate::demos::Demo;
 use crate::gfx::font;
 use crate::gfx::font_data::FONT_8X8;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 pub struct SmpteDiag;
 impl SmpteDiag { pub fn new() -> Self { Self } }
@@ -39,7 +40,7 @@ const BARS: [u32; 8] = [
 ];
 
 impl Demo for SmpteDiag {
-    fn render(&mut self, renderer: &mut Renderer) {
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let w = renderer.width();
         let h = renderer.height();
         if w == 0 || h == 0 { return; }
