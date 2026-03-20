@@ -98,24 +98,19 @@ impl Framebuffer {
 
             log!("FB", "mailbox returned");
 
-            let fb_ptr = read_volatile(m.add(28)) & 0x3FFF_FFFF;
-            let pitch   = read_volatile(m.add(33));
+            let fb_ptr         = read_volatile(m.add(28)) & 0x3FFF_FFFF;
+            let pitch          = read_volatile(m.add(33));
             let isrgb_reported = read_volatile(m.add(37));
 
             log!("FB", "fb_ptr=0x{:08X}", fb_ptr);
             log!("FB", "pitch={}", pitch);
-            log!("FB", "isrgb reported by mailbox={}", isrgb_reported);
+            log!("FB", "isrgb={}", isrgb_reported);
 
-            // O VideoCore IV do Pi 3B reporta isrgb=0 (BGR) mesmo quando
-            // pedimos RGB explicitamente (tag 0x48006 com valor 1).
-            // Na prática o hardware escreve em formato BGR32 (0xXX_BB_GG_RR).
-            // Forçamos isrgb=0 aqui para que color_rgb() faça a troca correta
-            // e os bytes cheguem na ordem certa no framebuffer físico.
-            //
-            // Se o seu display mostrar cores invertidas (vermelho aparece azul),
-            // troque para isrgb=1 abaixo.
-            let isrgb: u32 = 0;
-            log!("FB", "isrgb forced={}", isrgb);
+            // Usa o valor reportado pelo mailbox diretamente.
+            // No Pi 3B / VideoCore IV: isrgb=1 (RGB).
+            // color_rgb() usa esse valor para montar a palavra de 32 bits
+            // na ordem correta para o hardware.
+            let isrgb = isrgb_reported;
 
             if fb_ptr == 0 || pitch == 0 {
                 log!("FB", "invalid framebuffer response");
@@ -138,23 +133,22 @@ impl Framebuffer {
         (self.depth / 8) as usize
     }
 
-    /// Converte (r, g, b) para o formato nativo do framebuffer físico.
+    /// Convierte (r, g, b) para o formato nativo do framebuffer físico.
     ///
-    /// Pi 3B / VideoCore IV:
-    ///   isrgb=0 → hardware espera BGR32  (byte order: B G R X)
-    ///   isrgb=1 → hardware espera RGB32  (byte order: R G B X)
+    /// No Pi 3B / VideoCore IV, o valor reportado pelo mailbox (tag 0x40006)
+    /// tem semântica invertida em relação ao que se esperaria:
+    ///   isrgb=1 → hardware espera BGR32  (0x00_BB_GG_RR)
+    ///   isrgb=0 → hardware espera RGB32  (0x00_RR_GG_BB)
     ///
-    /// A palavra de 32 bits é escrita com write_volatile em little-endian,
-    /// então o byte menos significativo vai para o endereço mais baixo.
-    /// BGR32: palavra = 0x00_RR_GG_BB → byte 0=BB, 1=GG, 2=RR, 3=00 ✓
+    /// Verificado empiricamente: isrgb=1 reportado, cores corretas com BGR.
     #[inline(always)]
     pub fn color_rgb(&self, r: u8, g: u8, b: u8) -> u32 {
         if self.isrgb != 0 {
-            // RGB32: 0x00_RR_GG_BB no registrador → R no byte alto
-            ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
-        } else {
-            // BGR32: 0x00_BB_GG_RR no registrador → B no byte alto
+            // isrgb=1 → BGR
             ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
+        } else {
+            // isrgb=0 → RGB
+            ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         }
     }
 
