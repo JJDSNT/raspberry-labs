@@ -4,21 +4,25 @@ set -e
 KERNEL=kernel8.img
 DTB_DIR="./dtb"
 DTB="$DTB_DIR/bcm2710-rpi-3-b-plus.dtb"
+DTB_PATCHED="$DTB_DIR/bcm2710-rpi-3-b-plus-patched.dtb"
 DTB_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/native-emulation/dtbs/bcm2710-rpi-3-b-plus.dtb"
 LAUNCHER_DIR="./launch"
 TARGET="aarch64-unknown-none-softfloat"
 
-CLEAN=0
+CLEAN_LIGHT=0
+CLEAN_FULL=0
 
 usage() {
-    echo "Usage: $0 [-c]"
-    echo "  -c    cargo clean antes de buildar"
+    echo "Usage: $0 [-c] [-C]"
+    echo "  -c    limpeza leve (remove kernel gerado e artefatos temporários)"
+    echo "  -C    limpeza total (cargo clean)"
     exit 1
 }
 
-while getopts "ch" opt; do
+while getopts "cCh" opt; do
     case $opt in
-        c) CLEAN=1 ;;
+        c) CLEAN_LIGHT=1 ;;
+        C) CLEAN_FULL=1 ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -62,13 +66,25 @@ if [ ! -f "$DTB" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Build
+# Limpeza
 # ---------------------------------------------------------------------------
 
-if [ "$CLEAN" -eq 1 ]; then
-    echo "[BUILD] Limpando artefatos anteriores..."
-    cargo clean
+if [ "$CLEAN_LIGHT" -eq 1 ]; then
+    echo "[CLEAN] Limpeza leve..."
+    rm -f "$KERNEL"
+    rm -f "$DTB_PATCHED"
 fi
+
+if [ "$CLEAN_FULL" -eq 1 ]; then
+    echo "[CLEAN] Limpeza total..."
+    cargo clean
+    rm -f "$KERNEL"
+    rm -f "$DTB_PATCHED"
+fi
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
 
 echo "[BUILD] Compilando kernel..."
 cargo build --release --target "$TARGET"
