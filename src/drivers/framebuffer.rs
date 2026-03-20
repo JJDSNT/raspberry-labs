@@ -3,7 +3,7 @@
 use core::ptr::{addr_of_mut, read_volatile, write_volatile};
 
 use crate::log;
-use crate::platform::mailbox::mailbox_call;
+use crate::platform::raspi3::mailbox::mailbox_call;
 
 const MBOX_CH_PROP: u8 = 8;
 
