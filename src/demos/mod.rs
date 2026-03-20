@@ -55,8 +55,12 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
 
 fn run_renderer_demo<D: Demo>(fb: Framebuffer, mut demo: D) -> ! {
     let mut renderer = Renderer::new(fb);
+    let mut frame: u64 = 0;
+
     loop {
         demo.render(&mut renderer);
         renderer.present();
+
+        frame = frame.wrapping_add(1);
     }
 }
