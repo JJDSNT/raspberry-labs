@@ -107,9 +107,8 @@ impl Framebuffer {
             log!("FB", "isrgb={}", isrgb_reported);
 
             // Usa o valor reportado pelo mailbox diretamente.
-            // No Pi 3B / VideoCore IV: isrgb=1 (RGB).
-            // color_rgb() usa esse valor para montar a palavra de 32 bits
-            // na ordem correta para o hardware.
+            // No Pi 3B / VideoCore IV: isrgb=1 → BGR na prática
+            // (semântica invertida do VideoCore; verificado empiricamente).
             let isrgb = isrgb_reported;
 
             if fb_ptr == 0 || pitch == 0 {
@@ -133,21 +132,17 @@ impl Framebuffer {
         (self.depth / 8) as usize
     }
 
-    /// Convierte (r, g, b) para o formato nativo do framebuffer físico.
+    /// Converte (r, g, b) para o formato nativo do framebuffer físico.
     ///
     /// No Pi 3B / VideoCore IV, o valor reportado pelo mailbox (tag 0x40006)
-    /// tem semântica invertida em relação ao que se esperaria:
+    /// tem semântica invertida:
     ///   isrgb=1 → hardware espera BGR32  (0x00_BB_GG_RR)
     ///   isrgb=0 → hardware espera RGB32  (0x00_RR_GG_BB)
-    ///
-    /// Verificado empiricamente: isrgb=1 reportado, cores corretas com BGR.
     #[inline(always)]
     pub fn color_rgb(&self, r: u8, g: u8, b: u8) -> u32 {
         if self.isrgb != 0 {
-            // isrgb=1 → BGR
             ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
         } else {
-            // isrgb=0 → RGB
             ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
         }
     }
@@ -226,48 +221,5 @@ impl Framebuffer {
                 unsafe { write_volatile(row.add(xx as usize), color); }
             }
         }
-    }
-
-    pub fn draw_gradient(&mut self) {
-        log!("FB", "drawing gradient");
-        if self.depth != 32 { return; }
-
-        let width_max  = self.width.saturating_sub(1).max(1);
-        let height_max = self.height.saturating_sub(1).max(1);
-
-        for y in 0..self.height {
-            let row = unsafe {
-                self.ptr.add(y as usize * self.pitch as usize) as *mut u32
-            };
-            for x in 0..self.width {
-                let r = ((x * 255) / width_max)  as u8;
-                let g = ((y * 255) / height_max) as u8;
-                let b = 128u8;
-                unsafe { write_volatile(row.add(x as usize), self.color_rgb(r, g, b)); }
-            }
-        }
-
-        log!("FB", "gradient done");
-    }
-
-    pub fn test_pattern(&mut self) {
-        log!("FB", "drawing test pattern");
-
-        let black = self.color_rgb(0,   0,   0  );
-        let red   = self.color_rgb(255, 0,   0  );
-        let green = self.color_rgb(0,   255, 0  );
-        let blue  = self.color_rgb(0,   0,   255);
-        let white = self.color_rgb(255, 255, 255);
-
-        self.clear(black);
-        self.fill_rect(0,                    0, self.width / 3, self.height, red);
-        self.fill_rect(self.width / 3,       0, self.width / 3, self.height, green);
-        self.fill_rect((self.width / 3) * 2, 0, self.width / 3, self.height, blue);
-
-        let cx = self.width / 2;
-        let cy = self.height / 2;
-        self.fill_rect(cx.saturating_sub(16), cy.saturating_sub(16), 32, 32, white);
-
-        log!("FB", "test pattern done");
     }
 }

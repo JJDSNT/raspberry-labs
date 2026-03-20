@@ -1,15 +1,18 @@
 // src/platform/bootargs.rs
 //
-// Mapeia a string de bootargs (ex: "demo=rasterbars width=1280 height=720")
-// para um BootConfig, sem alloc.
+// Único ponto do sistema que conhece tanto DemoKind quanto DiagKind.
+// Mapeia a string de bootargs para um BootTarget.
 
 use crate::demos::DemoKind;
+use crate::diagnostics::DiagKind;
 use crate::BootConfig;
 
-/// Parseia `bootargs` e aplica os valores encontrados sobre `config`.
-/// Campos não presentes nos bootargs mantêm o valor default.
-/// Suporta múltiplos espaços/tabs entre tokens (split_ascii_whitespace).
-pub fn apply_bootargs(args: &str, config: &mut BootConfig) {
+pub enum BootTarget {
+    Diag(DiagKind),
+    Demo(DemoKind),
+}
+
+pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarget) {
     for token in args.split_ascii_whitespace() {
         let Some((key, value)) = token.split_once('=') else {
             continue;
@@ -17,52 +20,36 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig) {
 
         match key {
             "demo" => {
-                config.demo = match value {
-                    "gradient"    => DemoKind::Gradient,
-                    "testpattern" => DemoKind::TestPattern,
-                    "rasterbars"  => DemoKind::RasterBars,
-                    "plasma"      => DemoKind::Plasma,
-                    "flame"       => DemoKind::Flame,
-                    "starfield"   => DemoKind::Starfield,
-                    "tunnel"      => DemoKind::Tunnel,
-                    "parallax"    => DemoKind::Parallax,
-                    _             => config.demo,
+                *target = match value {
+                    // diagnósticos
+                    "gradient"    => BootTarget::Diag(DiagKind::Gradient),
+                    "testpattern" => BootTarget::Diag(DiagKind::TestPattern),
+                    "smpte"       => BootTarget::Diag(DiagKind::Smpte),
+                    // demos
+                    "rasterbars"  => BootTarget::Demo(DemoKind::RasterBars),
+                    "plasma"      => BootTarget::Demo(DemoKind::Plasma),
+                    "flame"       => BootTarget::Demo(DemoKind::Flame),
+                    "starfield"   => BootTarget::Demo(DemoKind::Starfield),
+                    "tunnel"      => BootTarget::Demo(DemoKind::Tunnel),
+                    "parallax"    => BootTarget::Demo(DemoKind::Parallax),
+                    "juggler"     => BootTarget::Demo(DemoKind::Juggler),
+                    _             => return,
                 };
             }
-            "width" => {
-                if let Some(n) = parse_u32(value) {
-                    config.width = n;
-                }
-            }
-            "height" => {
-                if let Some(n) = parse_u32(value) {
-                    config.height = n;
-                }
-            }
-            "depth" => {
-                if let Some(n) = parse_u32(value) {
-                    config.depth = n;
-                }
-            }
+            "width"  => { if let Some(n) = parse_u32(value) { config.width  = n; } }
+            "height" => { if let Some(n) = parse_u32(value) { config.height = n; } }
+            "depth"  => { if let Some(n) = parse_u32(value) { config.depth  = n; } }
             _ => {}
         }
     }
 }
 
-/// Parseia um `&str` ASCII de dígitos decimais como `u32`.
-/// Retorna `None` para strings vazias, não-numéricas ou overflow.
 fn parse_u32(s: &str) -> Option<u32> {
-    if s.is_empty() {
-        return None;
-    }
-
+    if s.is_empty() { return None; }
     let mut result: u32 = 0;
     for b in s.bytes() {
-        if !b.is_ascii_digit() {
-            return None;
-        }
+        if !b.is_ascii_digit() { return None; }
         result = result.checked_mul(10)?.checked_add((b - b'0') as u32)?;
     }
-
     Some(result)
 }
