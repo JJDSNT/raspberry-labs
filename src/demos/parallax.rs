@@ -16,6 +16,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 // Dimensões internas fixas do algoritmo — idênticas ao original.
 const P_SIZE: usize = 256;               // textura interna 256×256
@@ -57,7 +58,7 @@ impl ParallaxDemo {
         }
     }
 
-    fn render_frame(&mut self, renderer: &mut Renderer) {
+    fn render_frame(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let w = renderer.width();
         let h = renderer.height();
         if w == 0 || h == 0 { return; }
@@ -140,7 +141,7 @@ impl ParallaxDemo {
 }
 
 impl Demo for ParallaxDemo {
-    fn render(&mut self, renderer: &mut Renderer) {
-        self.render_frame(renderer);
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
+        self.render_frame(renderer, _frame);
     }
 }

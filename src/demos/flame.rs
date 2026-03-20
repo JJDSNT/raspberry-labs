@@ -2,6 +2,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::{MAX_HEIGHT, MAX_WIDTH, Renderer};
+use crate::media::FrameContext;
 
 // 8 linhas extras afastam a fornalha da área visível — o calor decai
 // naturalmente antes de chegar à última linha renderizada.
@@ -48,7 +49,7 @@ impl FlameDemo {
         demo
     }
 
-    pub fn render(&mut self, renderer: &mut Renderer) {
+    pub fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let w = renderer.width().min(MAX_WIDTH);
         let h = renderer.height().min(MAX_HEIGHT);
         if w == 0 || h == 0 { return; }
@@ -136,8 +137,8 @@ impl FlameDemo {
 }
 
 impl Demo for FlameDemo {
-    fn render(&mut self, renderer: &mut Renderer) {
-        FlameDemo::render(self, renderer);
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
+        FlameDemo::render(self, renderer, _frame);
     }
 }
 

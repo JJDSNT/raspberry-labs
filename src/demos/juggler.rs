@@ -14,6 +14,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 use crate::math::raytracer::{
     color_to_argb, trace_ray, v3_add, v3_len, v3_scale, v3_sub,
     Camera, Light, Scene, Sphere, Texture, Vec3,
@@ -262,7 +263,7 @@ impl JugglerDemo {
 }
 
 impl Demo for JugglerDemo {
-    fn render(&mut self, renderer: &mut Renderer) {
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         if self.frame == 0 {
             crate::log!("JUGGLER", "first frame w={} h={}", renderer.width(), renderer.height());
         }

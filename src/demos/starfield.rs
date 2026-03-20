@@ -5,6 +5,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 const STAR_COUNT: usize = 192;
 const STARFIELD_DEPTH: i32 = 1024;
@@ -34,7 +35,7 @@ impl StarfieldDemo {
         }
     }
 
-    pub fn render(&mut self, renderer: &mut Renderer) {
+    pub fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let width = renderer.width();
         let height = renderer.height();
 
@@ -148,8 +149,8 @@ impl StarfieldDemo {
 }
 
 impl Demo for StarfieldDemo {
-    fn render(&mut self, renderer: &mut Renderer) {
-        StarfieldDemo::render(self, renderer);
+    fn render(&mut self, renderer: &mut Renderer, _frame: &crate::demos::FrameContext) {
+        StarfieldDemo::render(self, renderer, _frame);
     }
 }
 

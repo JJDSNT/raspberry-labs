@@ -17,6 +17,7 @@
 
 use crate::demos::Demo;
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 // Assets embutidos — ajuste o path relativo ao Cargo.toml se necessário
 static TEXTURE_DATA: &[u8] = include_bytes!("texture_rotated.bin");
@@ -212,7 +213,7 @@ impl TunnelDemo {
 }
 
 impl Demo for TunnelDemo {
-    fn render(&mut self, renderer: &mut Renderer) {
+    fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         // Clamp à resolução máxima suportada pela grade
         let w = renderer.width().min((GRID_W - 1) * 8);
         let h = renderer.height().min((GRID_H - 1) * 8);

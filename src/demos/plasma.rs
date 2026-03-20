@@ -4,6 +4,7 @@
 // Renderiza usando aritmética inteira e lookup table de seno.
 
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 const TABLE_SIZE: usize = 256;
 
@@ -28,7 +29,7 @@ impl Plasma {
     }
 
     /// Renderiza um frame.
-    pub fn render(&mut self, renderer: &mut Renderer) {
+    pub fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let width = renderer.width();
         let height = renderer.height();
         let t = self.time as usize;
@@ -146,7 +147,7 @@ fn fast_sin_256(x: u8) -> i16 {
 }
 
 impl crate::demos::Demo for Plasma {
-    fn render(&mut self, renderer: &mut crate::gfx::renderer::Renderer) {
-        Plasma::render(self, renderer);
+    fn render(&mut self, renderer: &mut crate::gfx::renderer::Renderer, _frame: &crate::demos::FrameContext) {
+        Plasma::render(self, renderer, _frame);
     }
 }

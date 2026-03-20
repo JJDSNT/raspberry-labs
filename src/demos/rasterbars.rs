@@ -4,6 +4,7 @@
 
 use crate::gfx::copper::{CopperOp, Rgb};
 use crate::gfx::renderer::Renderer;
+use crate::media::FrameContext;
 
 const TAU: usize = 256;
 
@@ -36,7 +37,7 @@ impl RasterBarsDemo {
         Self { frame: 0 }
     }
 
-    pub fn render(&mut self, renderer: &mut Renderer) {
+    pub fn render(&mut self, renderer: &mut Renderer, _frame: &FrameContext) {
         let screen_h = renderer.height() as u32;
 
         let copper = renderer.copper_mut();
@@ -128,7 +129,7 @@ fn sin8(idx: usize) -> i8 {
 }
 
 impl crate::demos::Demo for RasterBarsDemo {
-    fn render(&mut self, renderer: &mut crate::gfx::renderer::Renderer) {
-        RasterBarsDemo::render(self, renderer);
+    fn render(&mut self, renderer: &mut crate::gfx::renderer::Renderer, _frame: &crate::demos::FrameContext) {
+        RasterBarsDemo::render(self, renderer, _frame);
     }
 }
