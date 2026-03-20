@@ -1,11 +1,17 @@
 package demo
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
+
+// ---------------------------------------------------------------------------
+// Tipos
+// ---------------------------------------------------------------------------
 
 type Config struct {
 	Name        string
@@ -13,46 +19,90 @@ type Config struct {
 	BootArg     string
 }
 
-var All = []Config{
-	{Name: "Gradient", Description: "Gradiente de cores com retângulos", BootArg: "gradient"},
-	{Name: "Test Pattern", Description: "Grade de cores para calibração", BootArg: "testpattern"},
-	{Name: "Raster Bars", Description: "Barras de cor sincronizadas com raster", BootArg: "rasterbars"},
-	{Name: "Starfield", Description: "Campo de estrelas 3D em perspectiva", BootArg: "starfield"},
-	{Name: "Plasma", Description: "Efeito plasma com tabela de senos", BootArg: "plasma"},
-	{Name: "Flame", Description: "Simulação de fogo procedural", BootArg: "flame"},
-	{Name: "Tunnel", Description: "Túnel livre com textura e interpolação 8x8", BootArg: "tunnel"},
+type ScreenOption struct {
+	Label  string
+	Width  int
+	Height int
+	Depth  int
 }
+
+type DisplayMode string
+
+const (
+	DisplaySDL  DisplayMode = "sdl"
+	DisplayGTK  DisplayMode = "gtk"
+	DisplayNone DisplayMode = "none"
+)
+
+// ---------------------------------------------------------------------------
+// Dados
+// ---------------------------------------------------------------------------
+
+var All []Config
+
+// ---------------------------------------------------------------------------
+// Constantes
+// ---------------------------------------------------------------------------
 
 const (
 	dtbBaseName    = "bcm2710-rpi-3-b-plus.dtb"
 	dtbPatchedName = "bcm2710-rpi-3-b-plus-patched.dtb"
-
-	defaultWidth  = 640
-	defaultHeight = 480
-	defaultDepth  = 32
 )
 
-// dtbDir retorna o diretório onde ficam os DTBs.
-// DTB_DIR é setado pelo run.sh com path absoluto.
+// ---------------------------------------------------------------------------
+// Init (OBRIGATÓRIO carregar demos.txt)
+// ---------------------------------------------------------------------------
+
+func init() {
+	path := demosFilePath()
+
+	configs, err := loadConfigsFromFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "erro carregando demos (%s): %v\n", path, err)
+		os.Exit(1)
+	}
+
+	if len(configs) == 0 {
+		fmt.Fprintf(os.Stderr, "nenhum demo encontrado em %s\n", path)
+		os.Exit(1)
+	}
+
+	All = configs
+}
+
+func demosFilePath() string {
+	if p := os.Getenv("DEMOS_FILE"); p != "" {
+		return p
+	}
+	return "demo/demos.txt"
+}
+
+// ---------------------------------------------------------------------------
+// Paths
+// ---------------------------------------------------------------------------
+
 func dtbDir() string {
 	if d := os.Getenv("DTB_DIR"); d != "" {
 		return d
 	}
-	return "../dtb"
+	return "dtb"
 }
 
-// kernelPath retorna o path absoluto do kernel8.img.
 func kernelPath() string {
 	if p := os.Getenv("KERNEL_PATH"); p != "" {
 		return p
 	}
-	return "../kernel8.img"
+	return "kernel8.img"
 }
 
-func (c *Config) Launch() error {
+// ---------------------------------------------------------------------------
+// Launch
+// ---------------------------------------------------------------------------
+
+func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) error {
 	bootargs := fmt.Sprintf(
 		"demo=%s width=%d height=%d depth=%d",
-		c.BootArg, defaultWidth, defaultHeight, defaultDepth,
+		c.BootArg, screen.Width, screen.Height, screen.Depth,
 	)
 
 	dir := dtbDir()
@@ -63,48 +113,108 @@ func (c *Config) Launch() error {
 		return fmt.Errorf("DTB patch: %w", err)
 	}
 
-	return runQEMU(kernelPath(), patched)
+	return runQEMU(kernelPath(), patched, display)
 }
 
-// patchDTB copia o DTB base para patched e injeta os bootargs no /chosen.
+// ---------------------------------------------------------------------------
+// TXT loader
+// ---------------------------------------------------------------------------
+
+func loadConfigsFromFile(path string) ([]Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("não foi possível abrir arquivo: %w", err)
+	}
+	defer f.Close()
+
+	var configs []Config
+	scanner := bufio.NewScanner(f)
+
+	lineNum := 0
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Split(line, "|")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("linha %d inválida (formato: Nome|Descrição|bootarg)", lineNum)
+		}
+
+		cfg := Config{
+			Name:        strings.TrimSpace(parts[0]),
+			Description: strings.TrimSpace(parts[1]),
+			BootArg:     strings.TrimSpace(parts[2]),
+		}
+
+		if cfg.Name == "" {
+			return nil, fmt.Errorf("linha %d inválida: nome vazio", lineNum)
+		}
+		if cfg.BootArg == "" {
+			return nil, fmt.Errorf("linha %d inválida: bootarg vazio", lineNum)
+		}
+
+		configs = append(configs, cfg)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("erro lendo arquivo: %w", err)
+	}
+
+	return configs, nil
+}
+
+// ---------------------------------------------------------------------------
+// DTB patch
+// ---------------------------------------------------------------------------
+
 func patchDTB(base, patched, bootargs string) error {
 	if _, err := os.Stat(base); err != nil {
-		return fmt.Errorf(
-			"DTB base não encontrado em %s\n"+
-				"Execute ./run.sh para baixá-lo automaticamente", base)
+		return fmt.Errorf("DTB base não encontrado em %s", base)
 	}
 
 	src, err := os.ReadFile(base)
 	if err != nil {
-		return fmt.Errorf("lendo DTB base: %w", err)
-	}
-	if err := os.WriteFile(patched, src, 0644); err != nil {
-		return fmt.Errorf("escrevendo DTB patched: %w", err)
+		return fmt.Errorf("erro lendo DTB base: %w", err)
 	}
 
-	patch := exec.Command("fdtput", "-ts", patched, "/chosen", "bootargs", bootargs)
-	patch.Stdout = os.Stdout
-	patch.Stderr = os.Stderr
-	if err := patch.Run(); err != nil {
+	if err := os.WriteFile(patched, src, 0644); err != nil {
+		return fmt.Errorf("erro escrevendo DTB patched: %w", err)
+	}
+
+	cmd := exec.Command("fdtput", "-ts", patched, "/chosen", "bootargs", bootargs)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
 		_ = os.Remove(patched)
-		return fmt.Errorf("fdtput: %w", err)
+		return fmt.Errorf("erro executando fdtput: %w", err)
 	}
 
 	return nil
 }
 
-func runQEMU(kernel, dtb string) error {
-	cmd := exec.Command(
-		"qemu-system-aarch64",
+// ---------------------------------------------------------------------------
+// QEMU
+// ---------------------------------------------------------------------------
+
+func runQEMU(kernel, dtb string, display DisplayMode) error {
+	args := []string{
 		"-M", "raspi3b",
 		"-cpu", "cortex-a53",
 		"-kernel", kernel,
 		"-dtb", dtb,
 		"-serial", "stdio",
-		"-display", "sdl",
-	)
+		"-display", string(display),
+	}
+
+	cmd := exec.Command("qemu-system-aarch64", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
 	return cmd.Run()
 }

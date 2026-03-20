@@ -1,0 +1,10 @@
+# Nome|Descrição|bootarg
+
+Gradient|Gradiente de cores com retângulos|gradient
+Test Pattern|Grade de cores para calibração|testpattern
+Raster Bars|Barras de cor sincronizadas com raster|rasterbars
+Starfield|Campo de estrelas 3D em perspectiva|starfield
+Plasma|Efeito plasma com tabela de senos|plasma
+Flame|Simulação de fogo procedural|flame
+Tunnel|Túnel com textura e interpolação 8x8|tunnel
+Parallax|Scroll parallax com textura auto-modificável|parallax
