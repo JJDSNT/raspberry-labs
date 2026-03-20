@@ -1,31 +1,26 @@
 // src/kernel/scheduler.rs
+//
+// Scheduler cooperativo/preemptivo unificado.
+//
+// Todo switch de contexto passa pelo mesmo caminho via eret:
+//   - Preemptivo: IRQ de timer → preempt_from_irq → modifica frame → eret
+//   - Cooperativo: task emite svc #N → rust_svc_handler → modifica frame → eret
+//   - Boot dispatch: run() emite svc #3 → primeiro eret via mesmo caminho
+//
+// Não existe mais context_switch cooperativo separado.
+//
 
-use crate::arch::aarch64::context::context_switch;
-use crate::arch::aarch64::exception::{
-    disable_interrupts, restore_interrupts, save_and_disable_interrupts, ExceptionContext,
-};
+use crate::arch::aarch64::exception::ExceptionContext;
 use crate::kernel::sync::IrqSafeSpinLock;
 use crate::kernel::task::{Task, TaskEntry, TaskState, MAX_TASKS, TASK_STACK_SIZE};
 
+// Números de SVC — devem coincidir com os emitidos pelas funções públicas.
+pub const SVC_YIELD:    u64 = 0;
+pub const SVC_SLEEP:    u64 = 1;
+pub const SVC_FINISHED: u64 = 2;
+pub const SVC_BOOT:     u64 = 3;
+
 static mut TASK_STACKS: [[u8; TASK_STACK_SIZE]; MAX_TASKS] = [[0; TASK_STACK_SIZE]; MAX_TASKS];
-
-fn scheduler_boot_anchor() -> ! {
-    panic!("scheduler_boot_anchor reached unexpectedly");
-}
-
-const fn empty_context() -> ExceptionContext {
-    ExceptionContext {
-        x: [0; 31],
-        sp: 0,
-        elr_el1: 0,
-        spsr_el1: 0,
-    }
-}
-
-struct SwitchPlan {
-    old_ctx: *mut ExceptionContext,
-    new_ctx: *const ExceptionContext,
-}
 
 pub struct Scheduler {
     tasks: [Option<Task>; MAX_TASKS],
@@ -33,7 +28,6 @@ pub struct Scheduler {
     current: Option<usize>,
     next_id: usize,
     idle_index: Option<usize>,
-    boot_context: ExceptionContext,
 }
 
 impl Scheduler {
@@ -44,7 +38,6 @@ impl Scheduler {
             current: None,
             next_id: 0,
             idle_index: None,
-            boot_context: empty_context(),
         }
     }
 
@@ -53,7 +46,6 @@ impl Scheduler {
         self.current = None;
         self.next_id = 0;
         self.idle_index = None;
-        self.boot_context = empty_context();
 
         for slot in self.tasks.iter_mut() {
             *slot = None;
@@ -79,13 +71,7 @@ impl Scheduler {
         let slot = self.task_count;
         let stack_top = self.alloc_stack_top(slot);
 
-        self.tasks[slot] = Some(Task::new(
-            id,
-            name,
-            entry,
-            stack_top,
-            task_trampoline as usize,
-        ));
+        self.tasks[slot] = Some(Task::new(id, name, entry, stack_top));
         self.task_count += 1;
 
         Ok(id)
@@ -106,12 +92,7 @@ impl Scheduler {
         let slot = self.task_count;
         let stack_top = self.alloc_stack_top(slot);
 
-        self.tasks[slot] = Some(Task::new_idle(
-            id,
-            entry,
-            stack_top,
-            task_trampoline as usize,
-        ));
+        self.tasks[slot] = Some(Task::new_idle(id, entry, stack_top));
         self.task_count += 1;
         self.idle_index = Some(slot);
 
@@ -120,7 +101,7 @@ impl Scheduler {
 
     pub fn current_task_id(&self) -> Option<usize> {
         self.current
-            .and_then(|idx| self.tasks[idx].as_ref().map(|task| task.id.0))
+            .and_then(|idx| self.tasks[idx].as_ref().map(|t| t.id.0))
     }
 
     fn next_ready_index(&self, include_current: bool) -> Option<usize> {
@@ -163,166 +144,181 @@ impl Scheduler {
         idle_candidate
     }
 
-    fn prepare_boot_dispatch(&mut self) -> Option<SwitchPlan> {
-        let next_idx = self.next_ready_index(false)?;
+    // -----------------------------------------------------------------------
+    // Switch cooperativo via SVC
+    // -----------------------------------------------------------------------
 
-        self.current = Some(next_idx);
+    pub fn handle_svc(&mut self, svc_num: u64, ctx: &mut ExceptionContext) {
+        for i in 0..self.task_count {
+            if let Some(t) = &self.tasks[i] {
+                crate::log!(
+                    "SVC",
+                    "  slot={} id={} state={:?} idle={}",
+                    i,
+                    t.id.0,
+                    t.state,
+                    t.is_idle
+                );
+            }
+        }
+        // --- fim diagnóstico ---
 
-        let next_task = self.tasks[next_idx].as_mut().expect("task slot empty");
-        next_task.state = TaskState::Running;
-        self.boot_context.x[30] = scheduler_boot_anchor as usize as u64;
+        match svc_num {
+            SVC_BOOT => {
+                // Primeiro dispatch — escolhe a primeira task pronta.
+                let next_idx = match self.next_ready_index(false) {
+                    Some(idx) => idx,
+                    None => panic!("svc boot dispatch: no runnable tasks"),
+                };
 
-        crate::log!(
-            "SCHED",
-            "dispatching first task id={} name={}",
-            next_task.id.0,
-            next_task.name
-        );
+                self.current = Some(next_idx);
+                let task = self.tasks[next_idx].as_mut().unwrap();
+                task.state = TaskState::Running;
 
-        let old_ctx = &mut self.boot_context as *mut ExceptionContext;
-        let new_ctx = &next_task.frame as *const ExceptionContext;
+                crate::log!(
+                    "SCHED",
+                    "boot dispatch id={} name={}",
+                    task.id.0,
+                    task.name
+                );
 
-        Some(SwitchPlan { old_ctx, new_ctx })
-    }
+                *ctx = task.frame;
+            }
 
-    fn prepare_switch_from_current(&mut self, current_next_state: TaskState) -> Option<SwitchPlan> {
-        let current_idx = self.current?;
+            SVC_YIELD | SVC_SLEEP | SVC_FINISHED => {
+                let current_idx = match self.current {
+                    Some(i) => i,
+                    None => return,
+                };
 
-        {
-            let current = self.tasks[current_idx]
-                .as_mut()
-                .expect("current task slot empty");
-
-            match current_next_state {
-                TaskState::Ready => {
-                    if !current.is_idle {
-                        crate::log!("SCHED", "task id={} yielding", current.id.0);
+                let next_state = match svc_num {
+                    SVC_YIELD => {
+                        if !self.tasks[current_idx].as_ref().unwrap().is_idle {
+                            crate::log!(
+                                "SCHED",
+                                "task id={} yielding",
+                                self.tasks[current_idx].as_ref().unwrap().id.0
+                            );
+                        }
+                        TaskState::Ready
                     }
+                    SVC_SLEEP => {
+                        crate::log!(
+                            "SCHED",
+                            "task id={} sleeping forever",
+                            self.tasks[current_idx].as_ref().unwrap().id.0
+                        );
+                        TaskState::Sleeping
+                    }
+                    SVC_FINISHED => {
+                        crate::log!(
+                            "SCHED",
+                            "task id={} finished",
+                            self.tasks[current_idx].as_ref().unwrap().id.0
+                        );
+                        TaskState::Finished
+                    }
+                    _ => unreachable!(),
+                };
+
+                {
+                    let current = self.tasks[current_idx].as_mut().unwrap();
+                    current.frame = *ctx;
+                    current.state = next_state;
                 }
-                TaskState::Sleeping => {
-                    crate::log!("SCHED", "task id={} sleeping forever", current.id.0);
+
+                let include_current = next_state == TaskState::Ready;
+
+                let next_idx = match self.next_ready_index(include_current) {
+                    Some(idx) => idx,
+                    None => {
+                        self.tasks[current_idx].as_mut().unwrap().state = TaskState::Running;
+                        return;
+                    }
+                };
+
+                if next_idx == current_idx {
+                    self.tasks[current_idx].as_mut().unwrap().state = TaskState::Running;
+                    return;
                 }
-                TaskState::Finished => {
-                    crate::log!("SCHED", "task id={} finished", current.id.0);
-                }
-                TaskState::Running => {
-                    panic!("prepare_switch_from_current: invalid next state Running");
-                }
+
+                let old_id = self.tasks[current_idx].as_ref().unwrap().id.0;
+                self.current = Some(next_idx);
+
+                let new_frame = {
+                    let next = self.tasks[next_idx].as_mut().unwrap();
+                    next.state = TaskState::Running;
+                    crate::log!("SCHED", "switching task id={} -> id={}", old_id, next.id.0);
+                    next.frame
+                };
+
+                *ctx = new_frame;
             }
 
-            current.state = current_next_state;
-        }
-
-        let include_current = current_next_state == TaskState::Ready;
-
-        let next_idx = match self.next_ready_index(include_current) {
-            Some(idx) => idx,
-            None => {
-                let current = self.tasks[current_idx]
-                    .as_mut()
-                    .expect("current task slot empty");
-                current.state = TaskState::Running;
-                return None;
+            _ => {
+                crate::log!("SCHED", "unknown svc_num={}", svc_num);
             }
-        };
-
-        if next_idx == current_idx {
-            let current = self.tasks[current_idx]
-                .as_mut()
-                .expect("current task slot empty");
-            current.state = TaskState::Running;
-            return None;
         }
-
-        self.current = Some(next_idx);
-
-        let old_id = self.tasks[current_idx].as_ref().unwrap().id.0;
-
-        let new_id = {
-            let next = self.tasks[next_idx].as_mut().unwrap();
-            next.state = TaskState::Running;
-            next.id.0
-        };
-
-        crate::log!("SCHED", "switching task id={} -> id={}", old_id, new_id);
-
-        let old_ctx = {
-            let current = self.tasks[current_idx].as_mut().unwrap();
-            &mut current.frame as *mut ExceptionContext
-        };
-
-        let new_ctx = {
-            let next = self.tasks[next_idx].as_ref().unwrap();
-            &next.frame as *const ExceptionContext
-        };
-
-        Some(SwitchPlan { old_ctx, new_ctx })
     }
 
-    fn prepare_preempt_from_irq(
-        &mut self,
-        interrupted_ctx: &ExceptionContext,
-    ) -> Option<ExceptionContext> {
-        let current_idx = self.current?;
+    // -----------------------------------------------------------------------
+    // Preempção via IRQ de timer
+    // -----------------------------------------------------------------------
+
+    pub fn preempt_from_irq(&mut self, ctx: &mut ExceptionContext) {
+        let current_idx = match self.current {
+            Some(i) => i,
+            None => return,
+        };
 
         {
-            let current = self.tasks[current_idx]
-                .as_mut()
-                .expect("current task slot empty");
-
-            current.frame = *interrupted_ctx;
+            let current = self.tasks[current_idx].as_mut().unwrap();
+            current.frame = *ctx;
             current.state = TaskState::Ready;
         }
 
         let next_idx = match self.next_ready_index(true) {
             Some(idx) => idx,
             None => {
-                let current = self.tasks[current_idx]
-                    .as_mut()
-                    .expect("current task slot empty");
-                current.state = TaskState::Running;
-                return None;
+                self.tasks[current_idx].as_mut().unwrap().state = TaskState::Running;
+                return;
             }
         };
 
         if next_idx == current_idx {
-            let current = self.tasks[current_idx]
-                .as_mut()
-                .expect("current task slot empty");
-            current.state = TaskState::Running;
-            return None;
+            self.tasks[current_idx].as_mut().unwrap().state = TaskState::Running;
+            return;
         }
 
+        let old_id = self.tasks[current_idx].as_ref().unwrap().id.0;
         self.current = Some(next_idx);
 
-        let old_id = self.tasks[current_idx].as_ref().unwrap().id.0;
-
-        let next_ctx = {
+        let new_frame = {
             let next = self.tasks[next_idx].as_mut().unwrap();
             next.state = TaskState::Running;
-
-            crate::log!(
-                "SCHED",
-                "preempt task id={} -> id={}",
-                old_id,
-                next.id.0
-            );
-
+            crate::log!("SCHED", "preempt task id={} -> id={}", old_id, next.id.0);
             next.frame
         };
 
-        Some(next_ctx)
+        *ctx = new_frame;
+    }
+
+    // -----------------------------------------------------------------------
+    // Acordar task (áudio, DMA, etc.)
+    // -----------------------------------------------------------------------
+
+    pub fn wake_task(&mut self, id: usize) -> bool {
+        for slot in self.tasks.iter_mut().flatten() {
+            if slot.id.0 == id && slot.state == TaskState::Sleeping {
+                slot.state = TaskState::Ready;
+                return true;
+            }
+        }
+        false
     }
 }
 
 static SCHEDULER: IrqSafeSpinLock<Scheduler> = IrqSafeSpinLock::new(Scheduler::new());
-
-#[inline(always)]
-fn perform_context_switch(plan: SwitchPlan) {
-    let irq_state = save_and_disable_interrupts();
-    unsafe { context_switch(plan.old_ctx, plan.new_ctx) };
-    restore_interrupts(irq_state);
-}
 
 pub fn init() {
     SCHEDULER.lock().init();
@@ -340,74 +336,45 @@ pub fn current_task_id() -> Option<usize> {
     SCHEDULER.lock().current_task_id()
 }
 
-pub fn yield_now() {
-    let plan = {
-        let mut sched = SCHEDULER.lock();
-        sched.prepare_switch_from_current(TaskState::Ready)
-    };
+pub fn wake_task(id: usize) -> bool {
+    SCHEDULER.lock().wake_task(id)
+}
 
-    if let Some(plan) = plan {
-        perform_context_switch(plan);
+pub fn yield_now() {
+    unsafe {
+        core::arch::asm!("svc #0", options(nomem, nostack));
     }
 }
 
 pub fn sleep_forever() -> ! {
-    let plan = {
-        let mut sched = SCHEDULER.lock();
-        sched.prepare_switch_from_current(TaskState::Sleeping)
-    };
-
-    let plan = plan.expect("sleep_forever: no runnable task available");
-
-    perform_context_switch(plan);
-
-    panic!("sleep_forever: returned after context_switch");
+    unsafe {
+        core::arch::asm!("svc #1", options(nomem, nostack));
+    }
+    panic!("sleep_forever: returned from svc");
 }
 
 pub fn mark_current_finished() -> ! {
-    let plan = {
-        let mut sched = SCHEDULER.lock();
-        sched.prepare_switch_from_current(TaskState::Finished)
-    };
-
-    let plan = plan.expect("mark_current_finished: no runnable task available");
-
-    perform_context_switch(plan);
-
-    panic!("mark_current_finished: returned after context_switch");
+    unsafe {
+        core::arch::asm!("svc #2", options(nomem, nostack));
+    }
+    panic!("mark_current_finished: returned from svc");
 }
 
+/// Inicia o scheduler via SVC #3.
+/// Passa pelo mesmo caminho de SAVE_CONTEXT + RESTORE_CONTEXT + eret
+/// que todos os outros switches — sem eret direto fora de exceção.
 pub fn run() -> ! {
     crate::log!("SCHED", "scheduler started");
-
-    let plan = {
-        let mut sched = SCHEDULER.lock();
-        sched.prepare_boot_dispatch()
-    };
-
-    let plan = plan.expect("scheduler run: no runnable tasks");
-
-    disable_interrupts();
-    unsafe { context_switch(plan.old_ctx, plan.new_ctx) };
-
-    panic!("scheduler run: returned from initial context_switch");
-}
-
-pub fn preempt_from_irq(interrupted_ctx: &ExceptionContext) -> Option<ExceptionContext> {
-    let mut sched = SCHEDULER.lock();
-    sched.prepare_preempt_from_irq(interrupted_ctx)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn task_trampoline() -> ! {
-    let entry_addr: usize;
-
     unsafe {
-        core::arch::asm!("mov {}, x19", out(reg) entry_addr);
+        core::arch::asm!("svc #3", options(nomem, nostack));
     }
+    panic!("scheduler run: returned from svc");
+}
 
-    let entry: TaskEntry = unsafe { core::mem::transmute::<usize, TaskEntry>(entry_addr) };
+pub fn preempt_from_irq(ctx: &mut ExceptionContext) {
+    SCHEDULER.lock().preempt_from_irq(ctx);
+}
 
-    entry();
-    mark_current_finished();
+pub fn handle_svc(svc_num: u64, ctx: &mut ExceptionContext) {
+    SCHEDULER.lock().handle_svc(svc_num, ctx);
 }

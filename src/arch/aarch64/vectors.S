@@ -3,18 +3,14 @@
 .section .text.vectors, "ax"
 .global __exception_vectors_start
 
-// ExceptionContext:
-//
-//   x[0..30]   = 31 * 8 = 248
-//   sp         = 8      -> 256
-//   elr_el1    = 8      -> 264
-//   spsr_el1   = 8      -> 272
-//
-// Tamanho total = 272 bytes
-// Já múltiplo de 16, então mantém SP alinhado.
-.set CTX_SIZE, 272
+// ExceptionContext layout:
+//   x[0..30]   = 31 * 8 = 248 bytes
+//   sp         = 8 bytes  -> offset 248
+//   elr_el1    = 8 bytes  -> offset 256
+//   spsr_el1   = 8 bytes  -> offset 264
+// Total = 272 bytes (múltiplo de 16)
+.set CTX_SIZE,     272
 
-// Offsets
 .set OFF_X0,         0
 .set OFF_X2,        16
 .set OFF_X4,        32
@@ -35,11 +31,17 @@
 .set OFF_ELR_EL1,  256
 .set OFF_SPSR_EL1, 264
 
+// ---------------------------------------------------------------------------
+// Macro: entrada de vetor (128 bytes por slot)
+// ---------------------------------------------------------------------------
 .macro VECTOR target
     b \target
     .space 128 - 4
 .endm
 
+// ---------------------------------------------------------------------------
+// Macro: salva contexto completo na stack
+// ---------------------------------------------------------------------------
 .macro SAVE_CONTEXT
     sub sp, sp, #CTX_SIZE
 
@@ -60,7 +62,6 @@
     stp x28, x29, [sp, #OFF_X28]
     str x30,      [sp, #OFF_X30]
 
-    // SP original antes do sub.
     add x0, sp, #CTX_SIZE
     str x0, [sp, #OFF_SP]
 
@@ -71,20 +72,19 @@
     str x0, [sp, #OFF_SPSR_EL1]
 .endm
 
+// ---------------------------------------------------------------------------
+// Macro: restaura contexto da stack e retorna via eret
+// ---------------------------------------------------------------------------
 .macro RESTORE_CONTEXT
-    // x0 = base do frame atual
-    // x1 = sp de destino
     mov x0, sp
     ldr x1, [x0, #OFF_SP]
 
-    // Restaura estado de retorno da exceção.
     ldr x2, [x0, #OFF_ELR_EL1]
     msr ELR_EL1, x2
 
     ldr x2, [x0, #OFF_SPSR_EL1]
     msr SPSR_EL1, x2
 
-    // Restaura GPRs, exceto x0/x1, que ficam por último.
     ldp x2,  x3,  [x0, #OFF_X2]
     ldp x4,  x5,  [x0, #OFF_X4]
     ldp x6,  x7,  [x0, #OFF_X6]
@@ -101,14 +101,15 @@
     ldp x28, x29, [x0, #OFF_X28]
     ldr x30,      [x0, #OFF_X30]
 
-    // Troca para a stack do contexto restaurado.
     mov sp, x1
 
-    // x1 e x0 por último, porque x0 ainda era a base do frame.
     ldr x1, [x0, #8]
     ldr x0, [x0, #0]
 .endm
 
+// ---------------------------------------------------------------------------
+// Macro: handler genérico para exceções que não fazem switch
+// ---------------------------------------------------------------------------
 .macro HANDLER label, rust_fn
 \label:
     SAVE_CONTEXT
@@ -118,8 +119,13 @@
     eret
 .endm
 
+// ---------------------------------------------------------------------------
+// Tabela de vetores — DEVE estar alinhada a 2KB (2^11)
+// Todos os handlers são definidos APÓS esta tabela.
+// ---------------------------------------------------------------------------
 .align 11
 __exception_vectors_start:
+
     // Current EL with SP0
     VECTOR exc_current_el_sp0_sync
     VECTOR exc_current_el_sp0_irq
@@ -127,7 +133,7 @@ __exception_vectors_start:
     VECTOR exc_current_el_sp0_serror
 
     // Current EL with SPx
-    VECTOR exc_current_el_spx_sync
+    VECTOR exc_current_el_spx_sync_svc     // sync → handler de SVC
     VECTOR exc_current_el_spx_irq
     VECTOR exc_current_el_spx_fiq
     VECTOR exc_current_el_spx_serror
@@ -144,12 +150,42 @@ __exception_vectors_start:
     VECTOR exc_lower_el_aarch32_fiq
     VECTOR exc_lower_el_aarch32_serror
 
+// ---------------------------------------------------------------------------
+// Handlers — definidos APÓS a tabela para não serem afetados pelo .align 11
+// ---------------------------------------------------------------------------
+
 HANDLER exc_current_el_sp0_sync,        rust_sync_exception_current_el_sp0
 HANDLER exc_current_el_sp0_irq,         rust_irq_exception_current_el_sp0
 HANDLER exc_current_el_sp0_fiq,         rust_fiq_exception_current_el_sp0
 HANDLER exc_current_el_sp0_serror,      rust_serror_exception_current_el_sp0
 
-HANDLER exc_current_el_spx_sync,        rust_sync_exception_current_el_spx
+// Handler especial para sync de EL1 SPx — detecta SVC e despacha
+exc_current_el_spx_sync_svc:
+    SAVE_CONTEXT
+
+    // Lê ESR_EL1 para identificar se é SVC.
+    // EC = bits [31:26]. SVC gerado de EL1 tem EC = 0x15.
+    mrs x1, ESR_EL1
+    lsr x2, x1, #26
+    and x2, x2, #0x3F
+    cmp x2, #0x15
+    b.ne exc_current_el_spx_sync_not_svc
+
+    // É SVC: extrai imediato dos bits [15:0] do ESR_EL1.
+    and x0, x1, #0xFFFF   // x0 = svc_num
+    mov x1, sp             // x1 = ponteiro para ExceptionContext na stack
+    bl rust_svc_handler
+
+    RESTORE_CONTEXT
+    eret
+
+exc_current_el_spx_sync_not_svc:
+    // Não é SVC — trata como exceção síncrona genérica.
+    mov x0, sp
+    bl rust_sync_exception_current_el_spx
+    RESTORE_CONTEXT
+    eret
+
 HANDLER exc_current_el_spx_irq,         rust_irq_exception_current_el_spx
 HANDLER exc_current_el_spx_fiq,         rust_fiq_exception_current_el_spx
 HANDLER exc_current_el_spx_serror,      rust_serror_exception_current_el_spx

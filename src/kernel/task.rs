@@ -26,9 +26,16 @@ pub struct Task {
     pub frame: ExceptionContext,
 }
 
-// SPSR_EL1 para voltar a EL1h.
-// M[3:0] = 0101 => EL1h
-const SPSR_EL1H: u64 = 0b0101;
+// SPSR_EL1 para retornar a EL1h com IRQs habilitadas.
+//
+// Bits [3:0] = 0b0101 => EL1h (usa SP_EL1)
+// Bit  [7]   = 0      => I = 0 => IRQ não mascarada (habilitada)
+// Bit  [8]   = 0      => A = 0 => SError não mascarado
+// Bit  [9]   = 0      => D = 0 => Debug não mascarado
+// Bit  [6]   = 0      => F = 0 => FIQ não mascarado
+//
+// Valor: 0x0000_0005
+const SPSR_EL1H_IRQ_ENABLED: u64 = 0b0101;
 
 impl Task {
     pub fn new(
@@ -36,18 +43,16 @@ impl Task {
         name: &'static str,
         entry: TaskEntry,
         stack_top: usize,
-        trampoline: usize,
     ) -> Self {
-        Self::build(id, name, entry, stack_top, trampoline, false)
+        Self::build(id, name, entry, stack_top, false)
     }
 
     pub fn new_idle(
         id: usize,
         entry: TaskEntry,
         stack_top: usize,
-        trampoline: usize,
     ) -> Self {
-        Self::build(id, "idle", entry, stack_top, trampoline, true)
+        Self::build(id, "idle", entry, stack_top, true)
     }
 
     fn build(
@@ -55,18 +60,16 @@ impl Task {
         name: &'static str,
         entry: TaskEntry,
         stack_top: usize,
-        trampoline: usize,
         is_idle: bool,
     ) -> Self {
-        let mut frame = ExceptionContext {
+        let frame = ExceptionContext {
             x: [0; 31],
             sp: stack_top as u64,
-            elr_el1: trampoline as u64,
-            spsr_el1: SPSR_EL1H,
+            // eret vai pular diretamente para a entry da task.
+            // Não há mais trampoline — IRQs são habilitadas pelo spsr.
+            elr_el1: entry as usize as u64,
+            spsr_el1: SPSR_EL1H_IRQ_ENABLED,
         };
-
-        // task_trampoline lê a entry em x19.
-        frame.x[19] = entry as usize as u64;
 
         Self {
             id: TaskId(id),

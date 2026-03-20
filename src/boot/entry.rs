@@ -34,10 +34,19 @@ pub extern "C" fn rust_entry(dtb_ptr: usize) -> ! {
 }
 
 fn early_arch_init() {
-
     crate::log!("BOOT", "early_arch_init: exceptions");
     crate::arch::aarch64::exception::init();
-    crate::log!("BOOT", "CurrentEL={}", crate::arch::aarch64::exception::current_el());
+    // Temporário: confirma que VBAR foi setado
+    let vbar: u64;
+    unsafe {
+        core::arch::asm!("mrs {}, VBAR_EL1", out(reg) vbar);
+    }
+    crate::log!("BOOT", "VBAR_EL1={:#018x}", vbar);
+    crate::log!(
+        "BOOT",
+        "CurrentEL={}",
+        crate::arch::aarch64::exception::current_el()
+    );
 
     crate::log!("BOOT", "early_arch_init: local irq route");
     crate::platform::raspi3::interrupts::init_core0_timer_irq();
@@ -49,12 +58,18 @@ fn early_arch_init() {
 
     crate::log!("BOOT", "early_arch_init: timer");
     crate::arch::aarch64::timer::init(100);
+
+    let cntfrq = crate::arch::aarch64::timer::counter_frequency();
+
     crate::log!(
         "BOOT",
         "cntfrq={} cntp_ctl={:#x}",
-        crate::arch::aarch64::timer::counter_frequency(),
+        cntfrq,
         crate::arch::aarch64::timer::control()
     );
+
+    crate::log!("BOOT", "early_arch_init: kernel time");
+    crate::kernel::time::init(cntfrq);
 
     crate::log!("BOOT", "early_arch_init: irq enable");
     crate::arch::aarch64::exception::enable_interrupts();

@@ -17,13 +17,15 @@ SECTIONS
         *(.data*)
     }
 
-    .bss : ALIGN(16) {
+    .bss : {
+        . = ALIGN(16);
         __bss_start = .;
         *(.bss*)
         *(COMMON)
+        . = ALIGN(16);
         __bss_end = .;
     }
 
     . = ALIGN(16);
-    __stack_top = . + 0x40000; /* 256 KiB stack */
+    __stack_top = . + 0x40000;
 }

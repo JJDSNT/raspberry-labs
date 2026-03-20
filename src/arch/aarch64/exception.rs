@@ -134,6 +134,11 @@ extern "C" fn rust_serror_exception_current_el_sp0(ctx: &mut ExceptionContext) {
 
 #[no_mangle]
 extern "C" fn rust_sync_exception_current_el_spx(ctx: &mut ExceptionContext) {
+    let esr: u64;
+    unsafe {
+        core::arch::asm!("mrs {}, ESR_EL1", out(reg) esr);
+    }
+    crate::log!("EXC", "sync_spx ESR={:#018x}", esr);
     unhandled_exception("sync current_el_spx", ctx);
 }
 
@@ -183,6 +188,16 @@ extern "C" fn rust_irq_exception_lower_el_aarch32(ctx: &mut ExceptionContext) {
 }
 
 #[no_mangle]
+extern "C" fn rust_svc_handler(svc_num: u64, ctx: &mut ExceptionContext) {
+    // IRQs já estão mascaradas pela CPU ao entrar na exceção.
+    // Garante que permanecem assim durante todo o handler,
+    // independente do que o lock faça ao ser dropado.
+    unsafe { crate::arch::aarch64::exception::disable_interrupts() };
+    crate::kernel::scheduler::handle_svc(svc_num, ctx);
+    // IRQs serão reabilitadas pelo spsr_el1 da próxima task no eret.
+}
+
+#[no_mangle]
 extern "C" fn rust_fiq_exception_lower_el_aarch32(ctx: &mut ExceptionContext) {
     unhandled_exception("fiq lower_el_aarch32", ctx);
 }
@@ -194,6 +209,7 @@ extern "C" fn rust_serror_exception_lower_el_aarch32(ctx: &mut ExceptionContext)
 
 #[inline(never)]
 fn handle_irq(ctx: &mut ExceptionContext) {
+    unsafe { crate::arch::aarch64::exception::disable_interrupts() };
     crate::arch::aarch64::irq::dispatch_pending_irqs(ctx);
 }
 
