@@ -1,7 +1,7 @@
 // src/gfx/renderer.rs
 //
 // Renderer — orquestrador de frames para o demo engine bare-metal (aarch64 / RPi)
-// Coordena framebuffer, blitter, copper e primitives para produzir cada frame.
+// Coordena framebuffer, blitter, copper, sprites e primitives para produzir cada frame.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -10,6 +10,7 @@ use crate::gfx::blitter::Blitter;
 use crate::gfx::copper::CopperList;
 use crate::gfx::font;
 use crate::gfx::primitives;
+use crate::gfx::sprite::{sprite_pixel, Sprite, SpriteBatch, SpriteInstance};
 
 // ---------------------------------------------------------------------------
 // Limites máximos do renderer
@@ -127,6 +128,101 @@ impl Renderer {
         &self.buffers[self.front_index()]
     }
 
+    #[inline]
+    fn blend_over(dst: u32, src: u32) -> u32 {
+        let sa = (src >> 24) & 0xFF;
+        if sa == 0 {
+            return dst;
+        }
+        if sa == 0xFF {
+            return src;
+        }
+
+        let sr = (src >> 16) & 0xFF;
+        let sg = (src >> 8) & 0xFF;
+        let sb = src & 0xFF;
+
+        let da = (dst >> 24) & 0xFF;
+        let dr = (dst >> 16) & 0xFF;
+        let dg = (dst >> 8) & 0xFF;
+        let db = dst & 0xFF;
+
+        let inv_sa = 255 - sa;
+
+        let out_a = sa + (da * inv_sa) / 255;
+        let out_r = (sr * sa + dr * inv_sa) / 255;
+        let out_g = (sg * sa + dg * inv_sa) / 255;
+        let out_b = (sb * sa + db * inv_sa) / 255;
+
+        ((out_a & 0xFF) << 24)
+            | ((out_r & 0xFF) << 16)
+            | ((out_g & 0xFF) << 8)
+            | (out_b & 0xFF)
+    }
+
+    fn draw_sprite_instance_impl(&mut self, instance: &SpriteInstance<'_>) {
+        if !instance.visible || !instance.is_valid() {
+            return;
+        }
+
+        let width_i32 = self.width as i32;
+        let height_i32 = self.height as i32;
+
+        let src_w = instance.src.w as i32;
+        let src_h = instance.src.h as i32;
+
+        let dst_left = instance.x;
+        let dst_top = instance.y;
+        let dst_right = dst_left + src_w;
+        let dst_bottom = dst_top + src_h;
+
+        if dst_right <= 0 || dst_bottom <= 0 || dst_left >= width_i32 || dst_top >= height_i32 {
+            return;
+        }
+
+        let clip_left = dst_left.max(0);
+        let clip_top = dst_top.max(0);
+        let clip_right = dst_right.min(width_i32);
+        let clip_bottom = dst_bottom.min(height_i32);
+
+        let start_x = (clip_left - dst_left) as usize;
+        let start_y = (clip_top - dst_top) as usize;
+        let end_x = (clip_right - dst_left) as usize;
+        let end_y = (clip_bottom - dst_top) as usize;
+
+        let width = self.width;
+        let idx = self.back_index();
+        let buffer = &mut self.buffers[idx];
+
+        let mut local_y = start_y;
+        while local_y < end_y {
+            let screen_y = (dst_top + local_y as i32) as usize;
+            let row_base = screen_y * width;
+
+            let mut local_x = start_x;
+            while local_x < end_x {
+                if let Some(src_px) = sprite_pixel(instance, local_x, local_y) {
+                    let alpha = (src_px >> 24) & 0xFF;
+                    if alpha != 0 {
+                        let screen_x = (dst_left + local_x as i32) as usize;
+                        let dst_idx = row_base + screen_x;
+
+                        if alpha == 0xFF {
+                            buffer[dst_idx] = src_px;
+                        } else {
+                            let dst_px = buffer[dst_idx];
+                            buffer[dst_idx] = Self::blend_over(dst_px, src_px);
+                        }
+                    }
+                }
+
+                local_x += 1;
+            }
+
+            local_y += 1;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // API de frame
     // -----------------------------------------------------------------------
@@ -226,6 +322,27 @@ impl Renderer {
     }
 
     // -----------------------------------------------------------------------
+    // Sprites
+    // -----------------------------------------------------------------------
+
+    #[inline]
+    pub fn draw_sprite(&mut self, sprite: &Sprite<'_>, x: i32, y: i32) {
+        let instance = SpriteInstance::new(sprite, x, y);
+        self.draw_sprite_instance_impl(&instance);
+    }
+
+    #[inline]
+    pub fn draw_sprite_instance(&mut self, instance: &SpriteInstance<'_>) {
+        self.draw_sprite_instance_impl(instance);
+    }
+
+    pub fn draw_sprite_batch<const N: usize>(&mut self, batch: &SpriteBatch<'_, N>) {
+        batch.for_each_sorted(|instance| {
+            self.draw_sprite_instance_impl(instance);
+        });
+    }
+
+    // -----------------------------------------------------------------------
     // Primitivas geométricas (primitives.rs)
     // -----------------------------------------------------------------------
 
@@ -291,25 +408,59 @@ impl Renderer {
     /// Desenha um caractere 8×8 em (x, y) com cor de frente e fundo.
     pub fn draw_char(&mut self, x: usize, y: usize, ch: char, fg: u32, bg: u32) {
         let idx = self.back_index();
-        font::draw_char(&mut self.buffers[idx][..self.pixels], self.width, self.height, x, y, ch, fg, bg);
+        font::draw_char(
+            &mut self.buffers[idx][..self.pixels],
+            self.width,
+            self.height,
+            x,
+            y,
+            ch,
+            fg,
+            bg,
+        );
     }
 
     /// Desenha um caractere 8×8 sem pintar o fundo (transparente).
     pub fn draw_char_transparent(&mut self, x: usize, y: usize, ch: char, fg: u32) {
         let idx = self.back_index();
-        font::draw_char_transparent(&mut self.buffers[idx][..self.pixels], self.width, self.height, x, y, ch, fg);
+        font::draw_char_transparent(
+            &mut self.buffers[idx][..self.pixels],
+            self.width,
+            self.height,
+            x,
+            y,
+            ch,
+            fg,
+        );
     }
 
     /// Desenha uma string 8×8 em (x, y) com cor de frente e fundo.
     pub fn draw_str(&mut self, x: usize, y: usize, s: &str, fg: u32, bg: u32) {
         let idx = self.back_index();
-        font::draw_str(&mut self.buffers[idx][..self.pixels], self.width, self.height, x, y, s, fg, bg);
+        font::draw_str(
+            &mut self.buffers[idx][..self.pixels],
+            self.width,
+            self.height,
+            x,
+            y,
+            s,
+            fg,
+            bg,
+        );
     }
 
     /// Desenha uma string 8×8 sem fundo (transparente).
     pub fn draw_str_transparent(&mut self, x: usize, y: usize, s: &str, fg: u32) {
         let idx = self.back_index();
-        font::draw_str_transparent(&mut self.buffers[idx][..self.pixels], self.width, self.height, x, y, s, fg);
+        font::draw_str_transparent(
+            &mut self.buffers[idx][..self.pixels],
+            self.width,
+            self.height,
+            x,
+            y,
+            s,
+            fg,
+        );
     }
 
     /// Largura em pixels de uma string com a fonte 8×8.
@@ -356,8 +507,8 @@ impl Renderer {
         let keep_old = 255u32 - keep_new;
 
         let front_idx = self.front_index();
-        let back_idx  = self.back_index();
-        let pixels    = self.pixels;
+        let back_idx = self.back_index();
+        let pixels = self.pixels;
 
         let (front, back): (&[u32; MAX_PIXELS], &mut [u32; MAX_PIXELS]) =
             if front_idx < back_idx {
@@ -370,8 +521,8 @@ impl Renderer {
 
         for (dst, src) in back[..pixels].iter_mut().zip(front[..pixels].iter()) {
             let r = (((*dst >> 16) & 0xFF) * keep_new + ((src >> 16) & 0xFF) * keep_old) / 255;
-            let g = (((*dst >> 8)  & 0xFF) * keep_new + ((src >> 8)  & 0xFF) * keep_old) / 255;
-            let b = ((*dst         & 0xFF) * keep_new + (src         & 0xFF) * keep_old) / 255;
+            let g = (((*dst >> 8) & 0xFF) * keep_new + ((src >> 8) & 0xFF) * keep_old) / 255;
+            let b = (((*dst) & 0xFF) * keep_new + ((*src) & 0xFF) * keep_old) / 255;
             *dst = 0xFF00_0000 | (r << 16) | (g << 8) | b;
         }
     }
@@ -390,14 +541,22 @@ impl Renderer {
     // -----------------------------------------------------------------------
 
     #[inline]
-    pub fn width(&self) -> usize { self.width }
+    pub fn width(&self) -> usize {
+        self.width
+    }
 
     #[inline]
-    pub fn height(&self) -> usize { self.height }
+    pub fn height(&self) -> usize {
+        self.height
+    }
 
     #[inline]
-    pub fn pixels(&self) -> usize { self.pixels }
+    pub fn pixels(&self) -> usize {
+        self.pixels
+    }
 
     #[inline]
-    pub fn frame(&self) -> u64 { self.frame_count }
+    pub fn frame(&self) -> u64 {
+        self.frame_count
+    }
 }

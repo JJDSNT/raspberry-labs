@@ -35,6 +35,7 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarg
                     "tunnel" => BootTarget::Demo(DemoKind::Tunnel),
                     "parallax" => BootTarget::Demo(DemoKind::Parallax),
                     "juggler" => BootTarget::Demo(DemoKind::Juggler),
+                    "sprite_bouncer" => BootTarget::Demo(DemoKind::SpriteBouncer),
 
                     _ => return,
                 };
