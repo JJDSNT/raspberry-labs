@@ -36,6 +36,9 @@ pub extern "C" fn rust_entry(dtb_ptr: usize) -> ! {
 fn early_arch_init() {
     crate::log!("BOOT", "early_arch_init: exceptions");
     crate::arch::aarch64::exception::init();
+
+    crate::arch::aarch64::regs::system::Cpacr::enable_fpu();
+    
     // Temporário: confirma que VBAR foi setado
     let vbar: u64;
     unsafe {

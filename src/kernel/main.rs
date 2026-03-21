@@ -96,6 +96,9 @@ pub fn kernel_main(info: &BootInfo) -> ! {
 
     spawn_runtime_self_test();
 
+       // USB
+    crate::drivers::usb::init();
+
     crate::kernel::scheduler::spawn("boot", boot_task)
         .expect("failed to spawn boot task");
 

@@ -283,3 +283,24 @@ impl Spsr {
         }
     }
 }
+
+pub struct Cpacr;
+
+impl Cpacr {
+    pub const FPEN_EL1_EL0: u64 = 0b11 << 20;
+
+    #[inline(always)]
+    pub fn enable_fpu() {
+        unsafe {
+            core::arch::asm!(
+                "mrs {v}, CPACR_EL1",
+                "orr {v}, {v}, {fpen}",
+                "msr CPACR_EL1, {v}",
+                "isb",
+                v = out(reg) _,
+                fpen = const Self::FPEN_EL1_EL0,
+                options(nostack, preserves_flags)
+            );
+        }
+    }
+}
