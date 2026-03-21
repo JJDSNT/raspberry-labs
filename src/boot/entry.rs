@@ -47,7 +47,7 @@ fn early_arch_init() {
         "CurrentEL={}",
         crate::arch::aarch64::exception::current_el()
     );
-
+    crate::arch::aarch64::mmu::init();
     crate::log!("BOOT", "early_arch_init: local irq route");
     crate::platform::raspi3::interrupts::init_core0_timer_irq();
     crate::log!(

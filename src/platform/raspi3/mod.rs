@@ -4,3 +4,5 @@ pub mod mailbox;
 pub mod memory_map;
 pub mod mmio;
 pub mod interrupts;
+
+pub mod peripheral;

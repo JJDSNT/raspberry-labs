@@ -4,17 +4,34 @@ SECTIONS
 {
     . = 0x80000;
 
-    .text : ALIGN(8) {
+    .text : ALIGN(4096) {
         KEEP(*(.text._start))
         *(.text*)
     }
 
-    .rodata : ALIGN(8) {
+    .rodata : ALIGN(4096) {
         *(.rodata*)
     }
 
-    .data : ALIGN(8) {
+    .data : ALIGN(4096) {
         *(.data*)
+    }
+
+    /*
+     * Seção dedicada para tabelas de página MMU.
+     *
+     * Fica separada do BSS por duas razões:
+     *   1. Garante alinhamento a 4KB sem depender de onde o BSS termina.
+     *   2. Permite flush de cache seletivo (só essa região) antes de
+     *      habilitar a MMU, evitando problemas de coerência.
+     *
+     * O zeroing desta seção é feito pelo loop de BSS do boot (inclui COMMON).
+     */
+    .mmu : ALIGN(4096) {
+        __mmu_start = .;
+        *(.mmu*)
+        . = ALIGN(4096);
+        __mmu_end = .;
     }
 
     .bss : {
@@ -27,5 +44,5 @@ SECTIONS
     }
 
     . = ALIGN(16);
-    __stack_top = . + 0x40000;
+    __stack_top = . + 0x40000; /* 256 KiB stack */
 }
