@@ -122,6 +122,7 @@ fn wait_interrupt(mask: u32) -> Result<(), &'static str> {
         let v = mmio::read(EMMC_INTERRUPT);
         if v & INT_ERR_MASK != 0 && v & mask == 0 {
             mmio::write(EMMC_INTERRUPT, 0xFFFF_FFFF);
+            reset_data_circuit();
             return Err("emmc: interrupt error");
         }
         if v & mask != 0 {
@@ -131,7 +132,17 @@ fn wait_interrupt(mask: u32) -> Result<(), &'static str> {
         delay_nop(10);
     }
     mmio::write(EMMC_INTERRUPT, 0xFFFF_FFFF);
+    reset_data_circuit();
     Err("emmc: timeout")
+}
+
+fn reset_data_circuit() {
+    let c1 = mmio::read(EMMC_CONTROL1);
+    mmio::write(EMMC_CONTROL1, c1 | (1 << 26)); // SRST_DATA
+    for _ in 0..1000u32 {
+        if mmio::read(EMMC_CONTROL1) & (1 << 26) == 0 { break; }
+        delay_nop(10);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -366,19 +377,22 @@ pub fn read_blocks(lba: u32, buf: &mut [u8]) -> bool {
         return false;
     }
 
-    let words = buf.len() / 4;
-    // SAFETY: buf é alinhado a &u8; lemos word a word e escrevemos como bytes
-    for i in 0..words {
+    // INT_READ_RDY dispara uma vez por bloco (512 bytes / 128 words).
+    // Lê todos os 128 words do bloco antes de esperar o próximo INT_READ_RDY.
+    for blk in 0..block_count as usize {
         if wait_interrupt(INT_READ_RDY).is_err() {
-            crate::log!("EMMC", "read timeout blk={}", i / 128);
+            crate::log!("EMMC", "read timeout blk={}", blk);
             return false;
         }
-        let w = mmio::read(EMMC_DATA);
-        let off = i * 4;
-        buf[off]     = (w & 0xFF) as u8;
-        buf[off + 1] = ((w >> 8)  & 0xFF) as u8;
-        buf[off + 2] = ((w >> 16) & 0xFF) as u8;
-        buf[off + 3] = ((w >> 24) & 0xFF) as u8;
+        let base = blk * 512;
+        for i in 0..128usize {
+            let w = mmio::read(EMMC_DATA);
+            let off = base + i * 4;
+            buf[off]     = (w       & 0xFF) as u8;
+            buf[off + 1] = (w >> 8  & 0xFF) as u8;
+            buf[off + 2] = (w >> 16 & 0xFF) as u8;
+            buf[off + 3] = (w >> 24 & 0xFF) as u8;
+        }
     }
 
     if wait_interrupt(INT_DATA_DONE).is_err() {
