@@ -22,3 +22,7 @@ void* malloc(size_t size) { (void)size; return NULL; }
 void  free(void* ptr)     { (void)ptr; }
 void* realloc(void* ptr, size_t size) { (void)ptr; (void)size; return NULL; }
 void* calloc(size_t n, size_t size)   { (void)n; (void)size; return NULL; }
+
+// cpu_instr_callback — chamado pelo Musashi a cada instrução (M68K_INSTRUCTION_HOOK).
+// Stub vazio: sem disassembler em bare-metal.
+void cpu_instr_callback(void) {}

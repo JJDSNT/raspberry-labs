@@ -29,6 +29,7 @@ pub enum DemoKind {
     Parallax,
     Juggler,
     SpriteBouncer,
+    Omega,
 }
 
 impl DemoKind {
@@ -42,6 +43,7 @@ impl DemoKind {
             DemoKind::Parallax      => "Parallax",
             DemoKind::Juggler       => "Juggler",
             DemoKind::SpriteBouncer => "SpriteBouncer",
+            DemoKind::Omega         => "Omega",
         }
     }
 }
@@ -62,6 +64,7 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
         DemoKind::Parallax      => run_renderer_demo(fb, parallax::ParallaxDemo::new()),
         DemoKind::Juggler       => run_renderer_demo(fb, juggler::JugglerDemo::new()),
         DemoKind::SpriteBouncer => run_renderer_demo(fb, sprite_bouncer::SpriteBouncerDemo::new()),
+        DemoKind::Omega         => crate::emu::run(fb),
     }
 }
 
