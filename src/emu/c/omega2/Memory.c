@@ -14,6 +14,13 @@
 #include "Memory.h"
 #include "kick12.h"
 #include "kick13.h"
+// AROS open-source Kickstart replacement.
+// Gerado por: python3 src/emu/rom/gen_rom.py  (não commitado no git)
+#if defined(USE_AROS) && __has_include("aros_main.h")
+#include "aros_main.h"
+#include "aros_ext.h"
+#define HAVE_AROS 1
+#endif
 #include "m68k.h"
 #include "CIA.h"
 #include "Floppy.h"
@@ -858,8 +865,8 @@ Omega_t* InitRAM(int RAM32bitSize){
     InitChipset(((Omega_t*)RAM24bit)->chipRAM, ((Omega_t*)RAM24bit)->Chipstate);
     InitCIA(((Omega_t*)RAM24bit)->Chipstate, ((Omega_t*)RAM24bit)->CIAState);
 
-    //Clear the AutoConfig space
-    for(int i=0xE80000;i<0xF80000;++i){
+    //Clear the AutoConfig space and Extended ROM region
+    for(int i=0xE00000;i<0xF80000;++i){
         RAM24bit[i] = 0x00;
     }
 
@@ -871,12 +878,22 @@ Omega_t* InitRAM(int RAM32bitSize){
         RAM24bit[i] = 0x84;
     }
 
-    omega_host_log("Omega: copying Kickstart ROM");
-
     //copy ROM image into 24bit address space
-    for(int i = 0;i<sizeof(kick12); ++i){
+#if defined(HAVE_AROS)
+    omega_host_log("Omega: copying AROS ROM");
+    for(int i = 0; i < (int)sizeof(aros_main); ++i){
+        RAM24bit[0xF80000 + i] = aros_main[i];
+    }
+    omega_host_log("Omega: copying AROS Extended ROM");
+    for(int i = 0; i < (int)sizeof(aros_ext); ++i){
+        RAM24bit[0xE00000 + i] = aros_ext[i];
+    }
+#else
+    omega_host_log("Omega: copying Kickstart ROM");
+    for(int i = 0; i < (int)sizeof(kick12); ++i){
         RAM24bit[0xF80000 + i] = kick12[i];
     }
+#endif
 
 
     cpu_pulse_reset();

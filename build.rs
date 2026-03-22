@@ -72,6 +72,7 @@ fn main() {
         .include("src/emu/c/omega2")
 
         // Flags
+        .flag("-DUSE_AROS")
         .flag("-ffreestanding")
         .flag("-nostdlib")
         .flag("-fno-builtin")
