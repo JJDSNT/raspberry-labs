@@ -1,5 +1,6 @@
 # Nome|Descrição|bootarg
 
+Omega|Emulador Amiga (Kickstart 1.2, M68000)|omega
 Juggler|Raytracer clássico Amiga — esferas reflectivas|juggler
 Sprite Bouncer|Demo de sprite com bounce|sprite_bouncer
 Raster Bars|Barras de cor sincronizadas com raster|rasterbars
