@@ -105,6 +105,12 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 		c.BootArg, screen.Width, screen.Height, screen.Depth,
 	)
 
+	// Para o Omega, adiciona os nomes fixos dos discos na cmdline.
+	// O kernel tentará carregá-los do SD card; se não houver SD, continua sem disco.
+	if c.BootArg == "omega" {
+		bootargs += " df0=disk0.adf df1=disk1.adf"
+	}
+
 	dir := dtbDir()
 	base := filepath.Join(dir, dtbBaseName)
 	patched := filepath.Join(dir, dtbPatchedName)
@@ -113,7 +119,14 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 		return fmt.Errorf("DTB patch: %w", err)
 	}
 
-	return runQEMU(kernelPath(), patched, display, screen)
+	return runQEMU(kernelPath(), patched, display, screen, sdImgPath())
+}
+
+func sdImgPath() string {
+	if p := os.Getenv("SD_IMG_PATH"); p != "" {
+		return p
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +214,7 @@ func patchDTB(base, patched, bootargs string) error {
 // QEMU
 // ---------------------------------------------------------------------------
 
-func runQEMU(kernel, dtb string, display DisplayMode, screen ScreenOption) error {
+func runQEMU(kernel, dtb string, display DisplayMode, screen ScreenOption, sdImg string) error {
 	// Limitação do QEMU raspi3b: o display SDL tem tamanho fixo 640x480.
 	// Para outras resoluções, GTK é o único display que escala corretamente.
 	// Se o usuário escolheu SDL mas a resolução não é 640x480, avisa e usa GTK.
@@ -220,6 +233,14 @@ func runQEMU(kernel, dtb string, display DisplayMode, screen ScreenOption) error
 		"-dtb", dtb,
 		"-serial", "stdio",
 		"-display", string(effectiveDisplay),
+	}
+
+	// Adiciona SD card se a imagem existir
+	if sdImg != "" {
+		if _, err := os.Stat(sdImg); err == nil {
+			args = append(args, "-drive", fmt.Sprintf("file=%s,format=raw,if=sd", sdImg))
+			fmt.Fprintf(os.Stderr, "[SD] Usando %s\n", sdImg)
+		}
 	}
 
 	cmd := exec.Command("qemu-system-aarch64", args...)

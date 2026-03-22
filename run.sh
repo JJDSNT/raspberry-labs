@@ -13,20 +13,26 @@ TARGET_BE="aarch64_be-unknown-none-softfloat.json"
 CLEAN_LIGHT=0
 CLEAN_FULL=0
 BIG_ENDIAN=0
+CREATE_SD=0
+
+DISKS_DIR="./disks"
+SD_IMG="$(pwd)/sd.img"
 
 usage() {
-    echo "Usage: $0 [-b] [-c] [-C]"
+    echo "Usage: $0 [-b] [-c] [-C] [-s]"
     echo "  -b    build big-endian (requer cargo nightly)"
     echo "  -c    limpeza leve (remove kernel gerado e artefatos temporários)"
     echo "  -C    limpeza total (cargo clean)"
+    echo "  -s    cria/atualiza sd.img a partir de disks/disk0.adf e disks/disk1.adf"
     exit 1
 }
 
-while getopts "bcCh" opt; do
+while getopts "bcCsh" opt; do
     case $opt in
         b) BIG_ENDIAN=1 ;;
         c) CLEAN_LIGHT=1 ;;
         C) CLEAN_FULL=1 ;;
+        s) CREATE_SD=1 ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -44,6 +50,42 @@ else
     CARGO_TOOLCHAIN=""
     CARGO_EXTRA=""
     echo "[INFO] Build: little-endian (padrão)"
+fi
+
+# ---------------------------------------------------------------------------
+# SD card image
+# ---------------------------------------------------------------------------
+
+create_sd_image() {
+    command -v mcopy >/dev/null 2>&1 || {
+        echo "[ERROR] mtools não encontrado"
+        echo "[HINT]  sudo apt install mtools"
+        exit 1
+    }
+
+    mkdir -p "$DISKS_DIR"
+
+    echo "[SD] Criando $SD_IMG (32 MB, FAT32)..."
+    dd if=/dev/zero of="$SD_IMG" bs=1M count=32 status=none
+    mformat -i "$SD_IMG" -F -v "OMEGA" ::
+
+    ADDED=0
+    for n in 0 1; do
+        ADF="$DISKS_DIR/disk${n}.adf"
+        if [ -f "$ADF" ]; then
+            echo "[SD] Adicionando disk${n}.adf ($(du -h "$ADF" | cut -f1))..."
+            mcopy -i "$SD_IMG" "$ADF" "::disk${n}.adf"
+            ADDED=$((ADDED + 1))
+        else
+            echo "[SD] disk${n}.adf não encontrado em $DISKS_DIR — slot vazio"
+        fi
+    done
+
+    echo "[SD] $SD_IMG pronto ($ADDED disco(s) adicionado(s))"
+}
+
+if [ "$CREATE_SD" -eq 1 ]; then
+    create_sd_image
 fi
 
 # ---------------------------------------------------------------------------
@@ -150,5 +192,6 @@ echo "[LAUNCH] Iniciando seletor de demos..."
     KERNEL_PATH="$(cd .. && pwd)/$KERNEL" \
     DTB_PATH="$(cd .. && pwd)/$DTB" \
     DTB_DIR="$(cd .. && pwd)/$DTB_DIR" \
+    SD_IMG_PATH="$SD_IMG" \
     go run .
 )
