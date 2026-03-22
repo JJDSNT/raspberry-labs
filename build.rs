@@ -4,6 +4,15 @@ fn main() {
     println!("cargo:rerun-if-changed=lib/tinyusb");
     println!("cargo:rerun-if-changed=src/usb/tusb_config.h");
     println!("cargo:rerun-if-changed=src/usb/hal_dwc2.c");
+    println!("cargo:rerun-if-changed=src/usb/dwc2_raspi3.h");
+
+    // Substitui dwc2_bcm.h da biblioteca pelo nosso header para Pi 3 em tempo de build.
+    // O submodule lib/tinyusb não é modificado no git — apenas o arquivo em disco
+    // é sobrescrito durante a compilação.
+    std::fs::copy(
+        "src/usb/dwc2_raspi3.h",
+        "lib/tinyusb/src/portable/synopsys/dwc2/dwc2_bcm.h",
+    ).expect("falha ao copiar dwc2_raspi3.h -> dwc2_bcm.h");
 
     let tinyusb = "lib/tinyusb/src";
 
