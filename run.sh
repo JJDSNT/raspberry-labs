@@ -177,6 +177,15 @@ EOF
     local CMDLINE="demo=flame"
     if [ -f "$DISKS_DIR/disk0.adf" ]; then
         CMDLINE="demo=omega df0=disk0.adf df1=disk1.adf"
+        # Adiciona ROM se encontrada no diretório de discos
+        for ROM_FILE in "$DISKS_DIR"/*.rom "$DISKS_DIR"/*.ROM; do
+            [ -f "$ROM_FILE" ] || continue
+            ROM_NAME="$(basename "$ROM_FILE")"
+            CMDLINE="$CMDLINE rom=$ROM_NAME"
+            echo "[RPI] ROM: $ROM_NAME"
+            mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" "$ROM_FILE" "::$ROM_NAME"
+            break  # apenas o primeiro ROM encontrado
+        done
     fi
     printf '%s' "$CMDLINE" > /tmp/rpi_cmdline.txt
     mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" /tmp/rpi_cmdline.txt "::cmdline.txt"

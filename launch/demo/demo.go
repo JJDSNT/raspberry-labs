@@ -109,6 +109,10 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 	// O kernel tentará carregá-los do SD card; se não houver SD, continua sem disco.
 	if c.BootArg == "omega" {
 		bootargs += " df0=disk0.adf df1=disk1.adf"
+		// Se houver um arquivo .rom no mesmo diretório do SD, passa rom= na cmdline.
+		if rom := findRomFile(); rom != "" {
+			bootargs += " rom=" + rom
+		}
 	}
 
 	dir := dtbDir()
@@ -125,6 +129,27 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 func sdImgPath() string {
 	if p := os.Getenv("SD_IMG_PATH"); p != "" {
 		return p
+	}
+	return ""
+}
+
+// findRomFile procura por um arquivo .rom no diretório de discos (../disks/).
+// Retorna apenas o nome base (ex: "kick13.rom") para passar na cmdline.
+func findRomFile() string {
+	disksDir := filepath.Join(filepath.Dir(dtbDir()), "disks")
+	entries, err := os.ReadDir(disksDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		lower := strings.ToLower(name)
+		if strings.HasSuffix(lower, ".rom") {
+			return name
+		}
 	}
 	return ""
 }
