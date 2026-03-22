@@ -3,9 +3,37 @@
 // Único ponto do sistema que conhece tanto DemoKind quanto DiagKind.
 // Mapeia a string de bootargs para um BootTarget.
 
+use core::sync::atomic::{AtomicPtr, Ordering};
 use crate::boot::boot_info::BootConfig;
 use crate::demos::DemoKind;
 use crate::diagnostics::DiagKind;
+
+// Nomes dos ADFs passados na cmdline (df0=, df1=).
+// Guardam ponteiros para slices dentro da cmdline (lifetime 'static via DTB).
+static DF0_PTR: AtomicPtr<u8> = AtomicPtr::new(core::ptr::null_mut());
+static DF0_LEN: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static DF1_PTR: AtomicPtr<u8> = AtomicPtr::new(core::ptr::null_mut());
+static DF1_LEN: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+fn store_disk(ptr: &AtomicPtr<u8>, len: &core::sync::atomic::AtomicUsize, s: &'static str) {
+    ptr.store(s.as_ptr() as *mut u8, Ordering::Relaxed);
+    len.store(s.len(), Ordering::Relaxed);
+}
+
+pub fn df0() -> Option<&'static str> {
+    let p = DF0_PTR.load(Ordering::Relaxed);
+    let l = DF0_LEN.load(Ordering::Relaxed);
+    if p.is_null() || l == 0 { return None; }
+    // SAFETY: pointer e len vêm da cmdline 'static
+    Some(unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(p, l)) })
+}
+
+pub fn df1() -> Option<&'static str> {
+    let p = DF1_PTR.load(Ordering::Relaxed);
+    let l = DF1_LEN.load(Ordering::Relaxed);
+    if p.is_null() || l == 0 { return None; }
+    Some(unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(p, l)) })
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum BootTarget {
@@ -40,6 +68,19 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarg
 
                     _ => return,
                 };
+            }
+
+            "df0" => {
+                // SAFETY: value é uma fatia da cmdline que vive em memória 'static (DTB)
+                store_disk(&DF0_PTR, &DF0_LEN, unsafe {
+                    core::mem::transmute::<&str, &'static str>(value)
+                });
+            }
+
+            "df1" => {
+                store_disk(&DF1_PTR, &DF1_LEN, unsafe {
+                    core::mem::transmute::<&str, &'static str>(value)
+                });
             }
 
             "width" => {

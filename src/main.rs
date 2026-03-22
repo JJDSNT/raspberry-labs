@@ -28,6 +28,7 @@ mod media;
 mod demos;
 mod math;
 mod panic;
+mod fs;
 
 // Emulador
 mod emu;
