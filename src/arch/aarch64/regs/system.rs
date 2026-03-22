@@ -18,6 +18,7 @@ impl Sctlr {
     pub const SA:  u64 = 1 << 3;  // Stack Alignment Check EL1
     pub const SA0: u64 = 1 << 4;  // Stack Alignment Check EL0
     pub const I:   u64 = 1 << 12; // I-cache enable
+    pub const EE:  u64 = 1 << 25; // Big-endian data accesses at EL1
 
     #[inline(always)]
     pub fn read() -> u64 {

@@ -1,4 +1,14 @@
 // src/drivers/framebuffer.rs
+//
+// Todas as escritas no mbox buffer usam .to_le() e leituras usam from_le()
+// porque o GPU (VideoCore IV) acessa a RAM via DMA em little-endian,
+// independentemente do modo do CPU host.
+//
+// Escritas de pixel também usam .to_le() pelo mesmo motivo: o VideoCore IV
+// faz o scan do framebuffer em LE.
+//
+// Em builds LE: to_le/from_le são no-ops — zero custo.
+// Em builds BE: to_le/from_le fazem o swap necessário na fronteira com o GPU.
 
 use core::ptr::{addr_of_mut, read_volatile, write_volatile};
 
@@ -31,64 +41,64 @@ impl Framebuffer {
 
             let m = addr_of_mut!(MBOX.data) as *mut u32;
 
-            write_volatile(m.add(0), 40 * 4);
-            write_volatile(m.add(1), 0);
+            write_volatile(m.add(0),  (40 * 4u32).to_le());
+            write_volatile(m.add(1),  0u32.to_le());
 
             // set physical width/height
-            write_volatile(m.add(2), 0x0004_8003);
-            write_volatile(m.add(3), 8);
-            write_volatile(m.add(4), 8);
-            write_volatile(m.add(5), width);
-            write_volatile(m.add(6), height);
+            write_volatile(m.add(2),  0x0004_8003u32.to_le());
+            write_volatile(m.add(3),  8u32.to_le());
+            write_volatile(m.add(4),  8u32.to_le());
+            write_volatile(m.add(5),  width.to_le());
+            write_volatile(m.add(6),  height.to_le());
 
             // set virtual width/height
-            write_volatile(m.add(7), 0x0004_8004);
-            write_volatile(m.add(8), 8);
-            write_volatile(m.add(9), 8);
-            write_volatile(m.add(10), width);
-            write_volatile(m.add(11), height);
+            write_volatile(m.add(7),  0x0004_8004u32.to_le());
+            write_volatile(m.add(8),  8u32.to_le());
+            write_volatile(m.add(9),  8u32.to_le());
+            write_volatile(m.add(10), width.to_le());
+            write_volatile(m.add(11), height.to_le());
 
             // set virtual offset = (0, 0)
-            write_volatile(m.add(12), 0x0004_8009);
-            write_volatile(m.add(13), 8);
-            write_volatile(m.add(14), 8);
-            write_volatile(m.add(15), 0);
-            write_volatile(m.add(16), 0);
+            write_volatile(m.add(12), 0x0004_8009u32.to_le());
+            write_volatile(m.add(13), 8u32.to_le());
+            write_volatile(m.add(14), 8u32.to_le());
+            write_volatile(m.add(15), 0u32.to_le());
+            write_volatile(m.add(16), 0u32.to_le());
 
             // set depth
-            write_volatile(m.add(17), 0x0004_8005);
-            write_volatile(m.add(18), 4);
-            write_volatile(m.add(19), 4);
-            write_volatile(m.add(20), depth);
+            write_volatile(m.add(17), 0x0004_8005u32.to_le());
+            write_volatile(m.add(18), 4u32.to_le());
+            write_volatile(m.add(19), 4u32.to_le());
+            write_volatile(m.add(20), depth.to_le());
 
             // set pixel order (1 = RGB)
-            write_volatile(m.add(21), 0x0004_8006);
-            write_volatile(m.add(22), 4);
-            write_volatile(m.add(23), 4);
-            write_volatile(m.add(24), 1);
+            write_volatile(m.add(21), 0x0004_8006u32.to_le());
+            write_volatile(m.add(22), 4u32.to_le());
+            write_volatile(m.add(23), 4u32.to_le());
+            write_volatile(m.add(24), 1u32.to_le());
 
             // allocate framebuffer
-            write_volatile(m.add(25), 0x0004_0001);
-            write_volatile(m.add(26), 8);
-            write_volatile(m.add(27), 8);
-            write_volatile(m.add(28), 4096);
-            write_volatile(m.add(29), 0);
+            write_volatile(m.add(25), 0x0004_0001u32.to_le());
+            write_volatile(m.add(26), 8u32.to_le());
+            write_volatile(m.add(27), 8u32.to_le());
+            write_volatile(m.add(28), 4096u32.to_le());
+            write_volatile(m.add(29), 0u32.to_le());
 
             // get pitch
-            write_volatile(m.add(30), 0x0004_0008);
-            write_volatile(m.add(31), 4);
-            write_volatile(m.add(32), 4);
-            write_volatile(m.add(33), 0);
+            write_volatile(m.add(30), 0x0004_0008u32.to_le());
+            write_volatile(m.add(31), 4u32.to_le());
+            write_volatile(m.add(32), 4u32.to_le());
+            write_volatile(m.add(33), 0u32.to_le());
 
             // get pixel order
-            write_volatile(m.add(34), 0x0004_0006);
-            write_volatile(m.add(35), 4);
-            write_volatile(m.add(36), 4);
-            write_volatile(m.add(37), 0);
+            write_volatile(m.add(34), 0x0004_0006u32.to_le());
+            write_volatile(m.add(35), 4u32.to_le());
+            write_volatile(m.add(36), 4u32.to_le());
+            write_volatile(m.add(37), 0u32.to_le());
 
             // end tag
-            write_volatile(m.add(38), 0);
-            write_volatile(m.add(39), 0);
+            write_volatile(m.add(38), 0u32.to_le());
+            write_volatile(m.add(39), 0u32.to_le());
 
             log!("FB", "calling mailbox...");
             if !mailbox_call(MBOX_CH_PROP, m) {
@@ -98,9 +108,9 @@ impl Framebuffer {
 
             log!("FB", "mailbox returned");
 
-            let fb_ptr         = read_volatile(m.add(28)) & 0x3FFF_FFFF;
-            let pitch          = read_volatile(m.add(33));
-            let isrgb_reported = read_volatile(m.add(37));
+            let fb_ptr         = u32::from_le(read_volatile(m.add(28))) & 0x3FFF_FFFF;
+            let pitch          = u32::from_le(read_volatile(m.add(33)));
+            let isrgb_reported = u32::from_le(read_volatile(m.add(37)));
 
             log!("FB", "fb_ptr=0x{:08X}", fb_ptr);
             log!("FB", "pitch={}", pitch);
@@ -165,7 +175,7 @@ impl Framebuffer {
         if x >= self.width || y >= self.height { return; }
         if self.depth != 32 { return; }
         let offset = self.pixel_offset(x, y);
-        unsafe { write_volatile(self.ptr.add(offset) as *mut u32, color); }
+        unsafe { write_volatile(self.ptr.add(offset) as *mut u32, color.to_le()); }
     }
 
     /// Copia um frame ARGB8888 linear para o framebuffer físico.
@@ -194,7 +204,7 @@ impl Framebuffer {
             for x in 0..width {
                 let (_, r, g, b) = Self::decode_argb(src_row[x]);
                 let hw_color = self.color_rgb(r, g, b);
-                unsafe { write_volatile(dst_row.add(x), hw_color); }
+                unsafe { write_volatile(dst_row.add(x), hw_color.to_le()); }
             }
         }
     }
@@ -218,7 +228,7 @@ impl Framebuffer {
                 self.ptr.add(yy as usize * self.pitch as usize) as *mut u32
             };
             for xx in x0..x1 {
-                unsafe { write_volatile(row.add(xx as usize), color); }
+                unsafe { write_volatile(row.add(xx as usize), color.to_le()); }
             }
         }
     }

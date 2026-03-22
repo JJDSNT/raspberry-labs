@@ -1,32 +1,50 @@
 #!/bin/bash
 set -e
 
-KERNEL=kernel8.img
 DTB_DIR="./dtb"
 DTB="$DTB_DIR/bcm2710-rpi-3-b-plus.dtb"
 DTB_PATCHED="$DTB_DIR/bcm2710-rpi-3-b-plus-patched.dtb"
 DTB_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/native-emulation/dtbs/bcm2710-rpi-3-b-plus.dtb"
 LAUNCHER_DIR="./launch"
-TARGET="aarch64-unknown-none-softfloat"
+
+TARGET_LE="aarch64-unknown-none-softfloat"
+TARGET_BE="aarch64_be-unknown-none-softfloat.json"
 
 CLEAN_LIGHT=0
 CLEAN_FULL=0
+BIG_ENDIAN=0
 
 usage() {
-    echo "Usage: $0 [-c] [-C]"
+    echo "Usage: $0 [-b] [-c] [-C]"
+    echo "  -b    build big-endian (requer cargo nightly)"
     echo "  -c    limpeza leve (remove kernel gerado e artefatos temporários)"
     echo "  -C    limpeza total (cargo clean)"
     exit 1
 }
 
-while getopts "cCh" opt; do
+while getopts "bcCh" opt; do
     case $opt in
+        b) BIG_ENDIAN=1 ;;
         c) CLEAN_LIGHT=1 ;;
         C) CLEAN_FULL=1 ;;
         h) usage ;;
         *) usage ;;
     esac
 done
+
+if [ "$BIG_ENDIAN" -eq 1 ]; then
+    KERNEL="kernel8-be.img"
+    TARGET="$TARGET_BE"
+    CARGO_TOOLCHAIN="+nightly"
+    CARGO_EXTRA="-Z build-std=core,compiler_builtins"
+    echo "[INFO] Build: big-endian (requer nightly)"
+else
+    KERNEL="kernel8.img"
+    TARGET="$TARGET_LE"
+    CARGO_TOOLCHAIN=""
+    CARGO_EXTRA=""
+    echo "[INFO] Build: little-endian (padrão)"
+fi
 
 # ---------------------------------------------------------------------------
 # Pré-requisitos
@@ -45,6 +63,14 @@ cargo objcopy --version >/dev/null 2>&1 || {
     echo "[HINT]  cargo install cargo-binutils && rustup component add llvm-tools-preview"
     exit 1
 }
+
+if [ "$BIG_ENDIAN" -eq 1 ]; then
+    cargo +nightly --version >/dev/null 2>&1 || {
+        echo "[ERROR] cargo nightly não encontrado"
+        echo "[HINT]  rustup toolchain install nightly"
+        exit 1
+    }
+fi
 
 # ---------------------------------------------------------------------------
 # DTB base — baixa uma vez para dtb/
@@ -78,7 +104,7 @@ fi
 if [ "$CLEAN_FULL" -eq 1 ]; then
     echo "[CLEAN] Limpeza total..."
     cargo clean
-    rm -f "$KERNEL"
+    rm -f kernel8.img kernel8-be.img
     rm -f "$DTB_PATCHED"
 fi
 
@@ -87,10 +113,12 @@ fi
 # ---------------------------------------------------------------------------
 
 echo "[BUILD] Compilando kernel..."
-cargo build --release --target "$TARGET"
+# shellcheck disable=SC2086
+cargo $CARGO_TOOLCHAIN build --release --target "$TARGET" $CARGO_EXTRA
 
 echo "[BUILD] Gerando $KERNEL..."
-cargo objcopy --release --target "$TARGET" -- -O binary "$KERNEL"
+# shellcheck disable=SC2086
+cargo $CARGO_TOOLCHAIN objcopy --release --target "$TARGET" $CARGO_EXTRA -- -O binary "$KERNEL"
 
 if [ ! -f "$KERNEL" ]; then
     echo "[ERROR] $KERNEL não foi gerado"

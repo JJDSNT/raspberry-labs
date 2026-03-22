@@ -7,7 +7,11 @@ fn main() {
 
     let tinyusb = "lib/tinyusb/src";
 
-    cc::Build::new()
+    let endian = std::env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default();
+
+    let mut builder = cc::Build::new();
+
+    builder
         .compiler("aarch64-linux-gnu-gcc")
 
         // Core TinyUSB
@@ -32,6 +36,7 @@ fn main() {
         // Includes
         .include(tinyusb)
         .include("src/usb")
+        .include(format!("{}/portable/synopsys/dwc2", tinyusb))
 
         // Flags
         .flag("-ffreestanding")
@@ -48,9 +53,14 @@ fn main() {
         .flag("-D_FORTIFY_SOURCE=0")
         // Suprime o warning de pointer->int cast no DMA (ponteiros 64-bit
         // truncados para uint32_t — seguro no Pi 3 com RAM < 4GB)
-        .flag("-Wno-pointer-to-int-cast")
+        .flag("-Wno-pointer-to-int-cast");
 
-        .compile("tinyusb");
+    // Em builds big-endian, compila o código C no mesmo modo
+    if endian == "big" {
+        builder.flag("-mbig-endian");
+    }
+
+    builder.compile("tinyusb");
 
     // Garante inclusão completa da biblioteca mesmo com --gc-sections
     let out_dir = std::env::var("OUT_DIR").unwrap();

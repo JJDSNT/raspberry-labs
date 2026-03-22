@@ -132,9 +132,12 @@ pub fn init() {
 
         // Habilita MMU + D-cache + I-cache
         // Desabilita stack alignment check (SA, SA0) durante desenvolvimento
+        // Em builds BE (target_endian = "big"), seta EE para data accesses em BE
         let mut sctlr = Sctlr::read();
         sctlr &= !(Sctlr::SA | Sctlr::SA0);
         sctlr |= Sctlr::M | Sctlr::C | Sctlr::I;
+        #[cfg(target_endian = "big")]
+        { sctlr |= Sctlr::EE; }
         Sctlr::write(sctlr);
     }
 

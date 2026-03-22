@@ -13,13 +13,13 @@ const MBOX_EMPTY: u32 = 0x4000_0000;
 #[inline(always)]
 fn mmio_write(addr: usize, value: u32) {
     unsafe {
-        core::ptr::write_volatile(addr as *mut u32, value);
+        core::ptr::write_volatile(addr as *mut u32, value.to_le());
     }
 }
 
 #[inline(always)]
 fn mmio_read(addr: usize) -> u32 {
-    unsafe { core::ptr::read_volatile(addr as *const u32) }
+    unsafe { u32::from_le(core::ptr::read_volatile(addr as *const u32)) }
 }
 
 /// Barreira de memória completa — garante ordenação de leituras e escritas
@@ -56,7 +56,7 @@ pub fn mailbox_call(channel: u8, mbox: *mut u32) -> bool {
             dmb();
 
             unsafe {
-                return core::ptr::read_volatile(mbox.add(1)) == 0x8000_0000;
+                return u32::from_le(core::ptr::read_volatile(mbox.add(1))) == 0x8000_0000;
             }
         }
     }
