@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/usb/tusb_config.h");
     println!("cargo:rerun-if-changed=src/usb/hal_dwc2.c");
     println!("cargo:rerun-if-changed=src/usb/dwc2_raspi3.h");
+    println!("cargo:rerun-if-changed=src/emu");
 
     // Substitui dwc2_bcm.h da biblioteca pelo nosso header para Pi 3 em tempo de build.
     // O submodule lib/tinyusb não é modificado no git — apenas o arquivo em disco
@@ -42,10 +43,32 @@ fn main() {
         // HAL do Pi 3
         .file("src/usb/hal_dwc2.c")
 
+        // Omega2 emulator
+        .file("src/emu/c/omega_glue.c")
+        .file("src/emu/c/omega_stubs.c")
+        .file("src/emu/c/omega2/Memory.c")
+        .file("src/emu/c/omega2/Chipset.c")
+        .file("src/emu/c/omega2/CIA.c")
+        .file("src/emu/c/omega2/DMA.c")
+        .file("src/emu/c/omega2/Floppy.c")
+        .file("src/emu/c/omega2/Blitter.c")
+        .file("src/emu/c/omega2/Copper.c")
+        .file("src/emu/c/omega2/Denise.c")
+        .file("src/emu/c/omega2/Bitplane.c")
+        .file("src/emu/c/omega2/EventQueue.c")
+        .file("src/emu/c/omega2/m68kcpu.c")
+        .file("src/emu/c/omega2/m68kops.c")
+        .file("src/emu/c/omega2/m68kopac.c")
+        .file("src/emu/c/omega2/m68kopdm.c")
+        .file("src/emu/c/omega2/m68kopnz.c")
+        .file("src/emu/c/omega2/m68kdasm.c")
+
         // Includes
         .include(tinyusb)
         .include("src/usb")
         .include(format!("{}/portable/synopsys/dwc2", tinyusb))
+        .include("src/emu/c")
+        .include("src/emu/c/omega2")
 
         // Flags
         .flag("-ffreestanding")

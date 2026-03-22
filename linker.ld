@@ -45,4 +45,9 @@ SECTIONS
 
     . = ALIGN(16);
     __stack_top = . + 0x40000; /* 256 KiB stack */
+
+    /* Região reservada para o estado do emulador Omega (16MB) */
+    /* Posicionada em 16MB — bem acima do kernel + stack */
+    __emu_start = 0x1000000;
+    __emu_end   = 0x2000000;
 }

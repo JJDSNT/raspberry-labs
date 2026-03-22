@@ -28,3 +28,6 @@ mod media;
 mod demos;
 mod math;
 mod panic;
+
+// Emulador
+mod emu;
