@@ -52,24 +52,27 @@ fn read_adf(drive: i32, name: &str, addr: usize) -> bool {
 pub fn run(fb: Framebuffer) -> ! {
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
 
-    // 1. Lê ADFs do SD para buffers fixos na RAM (antes do init para usar o SD
-    //    enquanto o controlador ainda está exclusivo desta task).
-    let df0_loaded = crate::platform::raspi3::emmc::init()
-        .then(|| {
-            let a = bootargs::df0().map(|n| read_adf(0, n, DF0_ADDR)).unwrap_or(false);
-            let b = bootargs::df1().map(|n| read_adf(1, n, DF1_ADDR)).unwrap_or(false);
-            (a, b)
-        })
-        .unwrap_or((false, false));
-
-    // 2. Inicializa o emulador — carrega ROM, chama FloppyInit() que zera
-    //    os slots de disco. Os dados ADF já estão nos buffers RAM.
-    let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
+    // 1. Inicializa o emulador: carrega ROM, inicializa chipset e slots de disco.
     let mut emu = OmegaEmu::new();
 
-    // 3. Insere os discos APÓS o init para que FloppyInit() não os descarte.
-    if df0_loaded.0 { unsafe { FloppyInsert(0, DF0_ADDR as *mut u8); } }
-    if df0_loaded.1 { unsafe { FloppyInsert(1, DF1_ADDR as *mut u8); } }
+    // 2. Lê ADFs do SD e insere nos slots — após FloppyInit(), ordem natural.
+    if crate::platform::raspi3::emmc::init() {
+        if let Some(name) = bootargs::df0() {
+            if read_adf(0, name, DF0_ADDR) {
+                unsafe { FloppyInsert(0, DF0_ADDR as *mut u8); }
+            }
+        }
+        if let Some(name) = bootargs::df1() {
+            if read_adf(1, name, DF1_ADDR) {
+                unsafe { FloppyInsert(1, DF1_ADDR as *mut u8); }
+            }
+        }
+    } else {
+        crate::log!("EMU", "SD card init failed — rodando sem disco");
+    }
+
+    // 3. Spawna USB após o SD para evitar contenção de IRQ durante a leitura.
+    let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
 
     loop {
         emu.run_frame();
