@@ -33,16 +33,18 @@ impl OmegaEmu {
     }
 }
 
-/// Carrega um ADF do SD card em `addr` e chama FloppyInsert.
-fn load_adf(drive: i32, name: &str, addr: usize) {
+/// Lê um ADF do SD card para o buffer em `addr`.
+/// Retorna true se carregou com sucesso.
+fn read_adf(drive: i32, name: &str, addr: usize) -> bool {
     crate::log!("EMU", "df{}: loading '{}'", drive, name);
     let buf = unsafe { core::slice::from_raw_parts_mut(addr as *mut u8, ADF_SIZE) };
     let n = crate::fs::fat32::load(name, buf);
     if n > 0 {
         crate::log!("EMU", "df{}: {} bytes loaded", drive, n);
-        unsafe { FloppyInsert(drive, addr as *mut u8); }
+        true
     } else {
         crate::log!("EMU", "df{}: load failed", drive);
+        false
     }
 }
 
@@ -50,19 +52,25 @@ fn load_adf(drive: i32, name: &str, addr: usize) {
 pub fn run(fb: Framebuffer) -> ! {
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
 
-    // Inicializa SD e carrega ADFs antes de iniciar o emulador
-    if !crate::platform::raspi3::emmc::init() {
-        crate::log!("EMU", "SD card init failed — rodando sem disco");
-    } else {
-        if let Some(name) = bootargs::df0() { load_adf(0, name, DF0_ADDR); }
-        if let Some(name) = bootargs::df1() { load_adf(1, name, DF1_ADDR); }
-    }
+    // 1. Lê ADFs do SD para buffers fixos na RAM (antes do init para usar o SD
+    //    enquanto o controlador ainda está exclusivo desta task).
+    let df0_loaded = crate::platform::raspi3::emmc::init()
+        .then(|| {
+            let a = bootargs::df0().map(|n| read_adf(0, n, DF0_ADDR)).unwrap_or(false);
+            let b = bootargs::df1().map(|n| read_adf(1, n, DF1_ADDR)).unwrap_or(false);
+            (a, b)
+        })
+        .unwrap_or((false, false));
 
-    // Spawna a task USB para que os callbacks HID sejam processados
-    // enquanto o emulador roda.
+    // 2. Inicializa o emulador — carrega ROM, chama FloppyInit() que zera
+    //    os slots de disco. Os dados ADF já estão nos buffers RAM.
     let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
-
     let mut emu = OmegaEmu::new();
+
+    // 3. Insere os discos APÓS o init para que FloppyInit() não os descarte.
+    if df0_loaded.0 { unsafe { FloppyInsert(0, DF0_ADDR as *mut u8); } }
+    if df0_loaded.1 { unsafe { FloppyInsert(1, DF1_ADDR as *mut u8); } }
+
     loop {
         emu.run_frame();
     }
