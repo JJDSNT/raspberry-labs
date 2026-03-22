@@ -5,9 +5,48 @@
 // via set_framebuffer().
 
 use core::sync::atomic::{AtomicPtr, AtomicI32, Ordering};
+use crate::kernel::sync::IrqSafeSpinLock;
 
 static FB_PTR:   AtomicPtr<u32> = AtomicPtr::new(core::ptr::null_mut());
 static FB_PITCH: AtomicI32      = AtomicI32::new(0);
+
+// ---------------------------------------------------------------------------
+// Ring buffer de eventos de teclado (USB HID → emulador)
+// Produzido pelo callback TinyUSB (omega_host_push_key).
+// Consumido pelo loop do emulador (omega_host_poll_key).
+// ---------------------------------------------------------------------------
+
+const KEY_RING_SIZE: usize = 64;
+
+struct KeyRing {
+    buf:  [(u8, u8); KEY_RING_SIZE], // (scancode, pressed)
+    head: usize,
+    tail: usize,
+}
+
+impl KeyRing {
+    const fn new() -> Self {
+        Self { buf: [(0, 0); KEY_RING_SIZE], head: 0, tail: 0 }
+    }
+
+    fn push(&mut self, scancode: u8, pressed: u8) {
+        let next = (self.tail + 1) % KEY_RING_SIZE;
+        if next != self.head {
+            self.buf[self.tail] = (scancode, pressed);
+            self.tail = next;
+        }
+        // silently drops events when full
+    }
+
+    fn pop(&mut self) -> Option<(u8, u8)> {
+        if self.head == self.tail { return None; }
+        let ev = self.buf[self.head];
+        self.head = (self.head + 1) % KEY_RING_SIZE;
+        Some(ev)
+    }
+}
+
+static KEY_RING: IrqSafeSpinLock<KeyRing> = IrqSafeSpinLock::new(KeyRing::new());
 
 /// Chamado pelo kernel antes de spawnar a task do emulador.
 pub fn set_framebuffer(ptr: *mut u32, pitch: i32) {
@@ -45,11 +84,25 @@ pub extern "C" fn omega_host_log(msg: *const core::ffi::c_char) {
     }
 }
 
+/// Chamado pelo TinyUSB HID (omega_input.c) para enfileirar um evento de tecla.
+#[no_mangle]
+pub extern "C" fn omega_host_push_key(scancode: u8, pressed: core::ffi::c_int) {
+    KEY_RING.lock().push(scancode, if pressed != 0 { 1 } else { 0 });
+}
+
+/// Chamado pelo emulador (omega_glue.c) para retirar um evento da fila.
+/// Retorna 1 se havia evento, 0 se a fila estava vazia.
 #[no_mangle]
 pub extern "C" fn omega_host_poll_key(
-    _scancode: *mut u8,
-    _pressed: *mut core::ffi::c_int,
+    scancode: *mut u8,
+    pressed: *mut core::ffi::c_int,
 ) -> core::ffi::c_int {
-    // No input yet — stub returns empty
-    0
+    match KEY_RING.lock().pop() {
+        Some((sc, pr)) => {
+            if !scancode.is_null() { unsafe { *scancode = sc; } }
+            if !pressed.is_null()  { unsafe { *pressed  = pr as core::ffi::c_int; } }
+            1
+        }
+        None => 0,
+    }
 }

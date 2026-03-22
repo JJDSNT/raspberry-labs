@@ -45,6 +45,7 @@ fn main() {
 
         // Omega2 emulator
         .file("src/emu/c/omega_glue.c")
+        .file("src/emu/c/omega_input.c")
         .file("src/emu/c/omega_stubs.c")
         .file("src/emu/c/omega2/Memory.c")
         .file("src/emu/c/omega2/Chipset.c")

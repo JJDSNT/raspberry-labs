@@ -15,8 +15,11 @@ void omega_host_vsync(void);
 // Log a message via kernel UART
 void omega_host_log(const char* msg);
 
-// Input: poll one key event. Returns 1 if event available, 0 if empty.
-// scancode: Amiga raw keycode, pressed: 1=down, 0=up
+// Input: enfileira um evento de tecla vindo do USB HID (chamado pelo C).
+// scancode: USB HID keycode, pressed: 1=down, 0=up
+void omega_host_push_key(uint8_t scancode, int pressed);
+
+// Input: retira um evento da fila. Retorna 1 se havia evento, 0 se vazia.
 int omega_host_poll_key(uint8_t* scancode, int* pressed);
 
 #endif /* OMEGA_HOST_H_ */

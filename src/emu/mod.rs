@@ -28,6 +28,11 @@ impl OmegaEmu {
 /// Ponto de entrada principal — chamado por run_demo() com o framebuffer real.
 pub fn run(fb: Framebuffer) -> ! {
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
+
+    // Spawna a task USB para que os callbacks HID sejam processados
+    // enquanto o emulador roda.
+    let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
+
     let mut emu = OmegaEmu::new();
     loop {
         emu.run_frame();
