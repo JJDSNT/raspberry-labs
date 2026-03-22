@@ -56,19 +56,17 @@ pub fn run(fb: Framebuffer) -> ! {
     let mut emu = OmegaEmu::new();
 
     // 2. Lê ADFs do SD e insere nos slots — após FloppyInit(), ordem natural.
-    if crate::platform::raspi3::emmc::init() {
-        if let Some(name) = bootargs::df0() {
-            if read_adf(0, name, DF0_ADDR) {
-                unsafe { FloppyInsert(0, DF0_ADDR as *mut u8); }
-            }
+    //    EMMC já foi inicializado em kernel_main; read_blocks falha silenciosamente
+    //    se o controlador não estiver disponível.
+    if let Some(name) = bootargs::df0() {
+        if read_adf(0, name, DF0_ADDR) {
+            unsafe { FloppyInsert(0, DF0_ADDR as *mut u8); }
         }
-        if let Some(name) = bootargs::df1() {
-            if read_adf(1, name, DF1_ADDR) {
-                unsafe { FloppyInsert(1, DF1_ADDR as *mut u8); }
-            }
+    }
+    if let Some(name) = bootargs::df1() {
+        if read_adf(1, name, DF1_ADDR) {
+            unsafe { FloppyInsert(1, DF1_ADDR as *mut u8); }
         }
-    } else {
-        crate::log!("EMU", "SD card init failed — rodando sem disco");
     }
 
     // 3. Spawna USB após o SD para evitar contenção de IRQ durante a leitura.

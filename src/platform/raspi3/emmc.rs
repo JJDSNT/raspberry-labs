@@ -249,6 +249,9 @@ fn send_acmd(rca: u32, cmd: u32, arg: u32) -> Option<[u32; 4]> {
 // ---------------------------------------------------------------------------
 
 pub fn init() -> bool {
+    if STATE.lock().is_some() {
+        return true; // já inicializado
+    }
     gpio_setup();
 
     let base_hz = emmc_base_clock();

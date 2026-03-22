@@ -96,7 +96,8 @@ pub fn kernel_main(info: &BootInfo) -> ! {
 
     spawn_runtime_self_test();
 
-       // USB
+    // Periféricos de armazenamento e I/O
+    crate::platform::raspi3::emmc::init();
     crate::drivers::usb::init();
 
     crate::kernel::scheduler::spawn("boot", boot_task)
