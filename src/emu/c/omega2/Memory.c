@@ -904,8 +904,8 @@ Omega_t* InitRAM(int RAM32bitSize){
 #else
         else {
             omega_host_log("Omega: copying Kickstart ROM (built-in)");
-            for(int i = 0; i < (int)sizeof(kick13); ++i){
-                RAM24bit[0xF80000 + i] = kick13[i];
+            for(int i = 0; i < (int)sizeof(kick12); ++i){
+                RAM24bit[0xF80000 + i] = kick12[i];
             }
         }
 #endif
