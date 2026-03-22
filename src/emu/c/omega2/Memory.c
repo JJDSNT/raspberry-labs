@@ -879,21 +879,37 @@ Omega_t* InitRAM(int RAM32bitSize){
     }
 
     //copy ROM image into 24bit address space
+    {
+        const uint8_t* dyn_rom  = omega_host_rom_ptr();
+        size_t         dyn_size = omega_host_rom_size();
+        if(dyn_rom != (void*)0 && dyn_size > 0){
+            // ROM carregada dinamicamente do SD card pelo kernel
+            omega_host_log("Omega: copying dynamic ROM from SD");
+            size_t copy_size = dyn_size < 0x80000 ? dyn_size : 0x80000;
+            for(size_t i = 0; i < copy_size; ++i){
+                RAM24bit[0xF80000 + i] = dyn_rom[i];
+            }
+        }
 #if defined(HAVE_AROS)
-    omega_host_log("Omega: copying AROS ROM");
-    for(int i = 0; i < (int)sizeof(aros_main); ++i){
-        RAM24bit[0xF80000 + i] = aros_main[i];
-    }
-    omega_host_log("Omega: copying AROS Extended ROM");
-    for(int i = 0; i < (int)sizeof(aros_ext); ++i){
-        RAM24bit[0xE00000 + i] = aros_ext[i];
-    }
+        else {
+            omega_host_log("Omega: copying AROS ROM");
+            for(int i = 0; i < (int)sizeof(aros_main); ++i){
+                RAM24bit[0xF80000 + i] = aros_main[i];
+            }
+            omega_host_log("Omega: copying AROS Extended ROM");
+            for(int i = 0; i < (int)sizeof(aros_ext); ++i){
+                RAM24bit[0xE00000 + i] = aros_ext[i];
+            }
+        }
 #else
-    omega_host_log("Omega: copying Kickstart ROM");
-    for(int i = 0; i < (int)sizeof(kick12); ++i){
-        RAM24bit[0xF80000 + i] = kick12[i];
-    }
+        else {
+            omega_host_log("Omega: copying Kickstart ROM (built-in)");
+            for(int i = 0; i < (int)sizeof(kick13); ++i){
+                RAM24bit[0xF80000 + i] = kick13[i];
+            }
+        }
 #endif
+    }
 
 
     cpu_pulse_reset();

@@ -4,11 +4,29 @@
 // O ponteiro do framebuffer é configurado antes de iniciar o emulador
 // via set_framebuffer().
 
-use core::sync::atomic::{AtomicPtr, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicPtr, AtomicI32, AtomicUsize, Ordering};
 use crate::kernel::sync::IrqSafeSpinLock;
 
 static FB_PTR:   AtomicPtr<u32> = AtomicPtr::new(core::ptr::null_mut());
 static FB_PITCH: AtomicI32      = AtomicI32::new(0);
+
+static ROM_PTR:  AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
+static ROM_SIZE: AtomicUsize    = AtomicUsize::new(0);
+
+pub fn set_rom(ptr: *const u8, size: usize) {
+    ROM_PTR.store(ptr as *mut u8, Ordering::Release);
+    ROM_SIZE.store(size, Ordering::Release);
+}
+
+#[no_mangle]
+pub extern "C" fn omega_host_rom_ptr() -> *const u8 {
+    ROM_PTR.load(Ordering::Acquire)
+}
+
+#[no_mangle]
+pub extern "C" fn omega_host_rom_size() -> usize {
+    ROM_SIZE.load(Ordering::Acquire)
+}
 
 // ---------------------------------------------------------------------------
 // Ring buffer de eventos de teclado (USB HID → emulador)
