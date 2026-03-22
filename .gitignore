@@ -6,3 +6,5 @@ disks/*.adf
 src/emu/c/omega2/aros_main.h
 src/emu/c/omega2/aros_ext.h
 src/emu/rom/aros.rom
+firmware/
+sdcard.img
