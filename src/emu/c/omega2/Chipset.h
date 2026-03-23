@@ -49,6 +49,7 @@ typedef struct{
     uint32_t CopperState;
     uint16_t CopperIR1;
     uint16_t CopperIR2;
+    uint64_t copper_wake_cycle; // findMatch: earliest DMA cycle to re-evaluate WAIT
     uint32_t VBL;
     uint8_t  CopperCDANG;  // COPCON bit 1: 0=block addr<0x80, 1=allow all (ECS/AGA)
     
