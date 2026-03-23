@@ -21,6 +21,7 @@ typedef struct{
     int delayCountdown;
     int stepReady;
     int empty;
+    int diskChanged;    // 1 = /DSKCHNG asserted LOW; cleared by a head step
     uint8_t mask;
     uint8_t* ADF;
     uint8_t* RAW;
@@ -42,6 +43,7 @@ void FloppyInit(void){
     drive[0].ADF = 0;
     drive[0].stepReady = 1;
     drive[0].empty = 1;
+    drive[0].diskChanged = 0;
 
     drive[1].state = idcode;
     drive[1].motor = 0;
@@ -50,7 +52,8 @@ void FloppyInit(void){
     drive[1].ADF = 0;
     drive[1].stepReady = 1;
     drive[1].empty = 1;
-    
+    drive[1].diskChanged = 0;
+
     drive[2].state = idcode;
     drive[2].motor = 0;
     drive[2].direction = 0;
@@ -58,7 +61,8 @@ void FloppyInit(void){
     drive[2].ADF = 0;
     drive[2].stepReady = 1;
     drive[2].empty = 1;
-    
+    drive[2].diskChanged = 0;
+
     drive[3].state = idcode;
     drive[3].motor = 0;
     drive[3].direction = 0;
@@ -66,6 +70,7 @@ void FloppyInit(void){
     drive[3].ADF = 0;
     drive[3].stepReady = 1;
     drive[3].empty = 1;
+    drive[3].diskChanged = 0;
     
     activeDrive = -1;
 }
@@ -81,13 +86,14 @@ void FloppyInsert(int number,uint8_t* ADFdata){
     drive[number].ADF = ADFdata;
     drive[number].RAW = ADFdata;
     drive[number].empty = 0;
+    drive[number].diskChanged = 1;  // /DSKCHNG goes LOW until first step
     printf("Floppy inserted in df%d\n",number);
 }
 
 void FloppyEject(int number){
     drive[number].ADF = 0;
     drive[number].empty = 1;
-    SetDriveEmpty();
+    drive[number].diskChanged = 1;  // ejection also triggers /DSKCHNG LOW
 }
 
 //uint8_t oldPRB;
@@ -183,14 +189,17 @@ void FloppyCycle(){
         
         //Set track step Direction
         int direction = (PRB >> 1) & 1;
-        
+
         if(direction){
             drive[number].cylinder += 1;
         }else{
             drive[number].cylinder -= 1;
             if(drive[number].cylinder < 0){drive[number].cylinder = 0;}
         }
-        
+
+        // A head step acknowledges the disk change — /DSKCHNG returns HIGH
+        drive[number].diskChanged = 0;
+
         //printf("Cylinder (side: %d) - %d (PRA: 0x%x) ********************************************************\n",drive[number].side >> 2,drive[number].cylinder, PRA); printCPUContext();
         printf(""); //Printf just as a debug break point
     }
@@ -201,11 +210,13 @@ void FloppyCycle(){
     }
     
 
-    //No disk, then clear the flag
-    if(drive[number].empty){
-        SetDriveEmpty();
+    // /DSKCHNG (CIA-A PRA bit2, active-LOW):
+    // LOW  = change pending (insert/eject occurred, not yet stepped)
+    // HIGH = stable (no pending change)
+    if(drive[number].diskChanged){
+        SetDiskChange();    // bit2 = 0
     }else{
-        SetDriveFull();
+        ClearDiskChange();  // bit2 = 1
     }
     
     //Set Zero Flag
