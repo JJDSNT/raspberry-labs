@@ -645,47 +645,35 @@ void AUD0DAT(uint16_t value){
 
 
 
-// B6
-void AUD1PER(uint16_t value){
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF0B6];
-    *p = value;
-    return;
-}
+// ---------------------------------------------------------------------------
+// Audio channels 1-3 — LCH/LCL/LEN/PER/VOL/DAT write handlers
+// H/L swap convention: writing LCH stores at base+2, LCL at base+0
+// so *(uint32_t*)&chipram[base] = (LCH<<16)|LCL = correct 32-bit pointer
+// ---------------------------------------------------------------------------
 
-// B8
-void AUD1VOL(uint16_t value){
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF0B8];
-    *p = value;
-    return;
-}
+// Channel 1 (base 0xDFF0B0)
+void AUD1LCH(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0B2] = value; }
+void AUD1LCL(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0B0] = value; }
+void AUD1LEN(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0B4] = value; }
+void AUD1PER(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0B6] = value; }
+void AUD1VOL(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0B8] = value; }
+void AUD1DAT(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0BA] = value; }
 
-// C6
-void AUD2PER(uint16_t value){
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF0C6];
-    *p = value;
-    return;
-}
+// Channel 2 (base 0xDFF0C0)
+void AUD2LCH(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0C2] = value; }
+void AUD2LCL(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0C0] = value; }
+void AUD2LEN(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0C4] = value; }
+void AUD2PER(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0C6] = value; }
+void AUD2VOL(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0C8] = value; }
+void AUD2DAT(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0CA] = value; }
 
-// C8
-void AUD2VOL(uint16_t value){
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF0C8];
-    *p = value;
-    return;
-}
-
-// D6
-void AUD3PER(uint16_t value){
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF0D6];
-    *p = value;
-    return;
-}
-
-// D8
-void AUD3VOL(uint16_t value){
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF0D8];
-    *p = value;
-    return;
-}
+// Channel 3 (base 0xDFF0D0)
+void AUD3LCH(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0D2] = value; }
+void AUD3LCL(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0D0] = value; }
+void AUD3LEN(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0D4] = value; }
+void AUD3PER(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0D6] = value; }
+void AUD3VOL(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0D8] = value; }
+void AUD3DAT(uint16_t value){ *(uint16_t*)&RAM24bit[0xDFF0DA] = value; }
 
 
 // E0
@@ -1615,14 +1603,29 @@ void InitChipset(void* chipram, void* memory){
     ChipsetState->WriteWord[0xA8] = AUD0VOL;
     ChipsetState->WriteWord[0xAA] = AUD0DAT;
     
+    // Channel 1
+    ChipsetState->WriteWord[0xB0] = AUD1LCH;
+    ChipsetState->WriteWord[0xB2] = AUD1LCL;
+    ChipsetState->WriteWord[0xB4] = AUD1LEN;
     ChipsetState->WriteWord[0xB6] = AUD1PER;
     ChipsetState->WriteWord[0xB8] = AUD1VOL;
-    
+    ChipsetState->WriteWord[0xBA] = AUD1DAT;
+
+    // Channel 2
+    ChipsetState->WriteWord[0xC0] = AUD2LCH;
+    ChipsetState->WriteWord[0xC2] = AUD2LCL;
+    ChipsetState->WriteWord[0xC4] = AUD2LEN;
     ChipsetState->WriteWord[0xC6] = AUD2PER;
     ChipsetState->WriteWord[0xC8] = AUD2VOL;
-    
+    ChipsetState->WriteWord[0xCA] = AUD2DAT;
+
+    // Channel 3
+    ChipsetState->WriteWord[0xD0] = AUD3LCH;
+    ChipsetState->WriteWord[0xD2] = AUD3LCL;
+    ChipsetState->WriteWord[0xD4] = AUD3LEN;
     ChipsetState->WriteWord[0xD6] = AUD3PER;
     ChipsetState->WriteWord[0xD8] = AUD3VOL;
+    ChipsetState->WriteWord[0xDA] = AUD3DAT;
     
     
     ChipsetState->WriteWord[0xE0] = BPL1PTH;

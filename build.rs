@@ -68,6 +68,7 @@ fn main() {
         .file("src/emu/c/omega2/denise/Denise.c")
         // paula
         .file("src/emu/c/omega2/paula/Floppy.c")
+        .file("src/emu/c/omega2/paula/Paula.c")
         // cpu
         .file("src/emu/c/omega2/cpu/m68kcpu.c")
         .file("src/emu/c/omega2/cpu/m68kops.c")
