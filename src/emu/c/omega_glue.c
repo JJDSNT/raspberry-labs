@@ -72,6 +72,11 @@ void omega_run_frame(void) {
 
     g_frame_count++;
 
+    // Early dump after frame 2 — capture AROS startup DMACON/BPLCON0 writes
+    if (g_frame_count == 2) {
+        probe_dump_serial(512);
+    }
+
     // One-shot dump after frame 22 — capture after Copper list is configured
     if (g_frame_count == 22) {
         os_debug_dump();

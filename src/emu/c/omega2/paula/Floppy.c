@@ -97,9 +97,9 @@ void FloppyCycle(){
     //check CIA B - PRB for any signals
     uint8_t PRB = ~RAM24bit[0xBFD100];  // invert the signals to make them easier to understand
     //uint8_t PRA = RAM24bit[0xBFE001];   // Just for DEbugging not needed for code to work
-    // SEL bits are 7:4 (/SEL3-/SEL0, active low).  Bit 3 is /MTR (motor).
-    // Shift by 4 to isolate only the SEL bits; driveLUT[1]=0, [2]=1, [4]=2, [8]=3.
-    int number = driveLUT[(PRB >> 4) & 0xF];
+    // /SEL0=bit3, /SEL1=bit4, /SEL2=bit5, /SEL3=bit6, /MTR=bit7 (confirmed via vAmiga CIA-B).
+    // Shift by 3; mask 4 bits excludes MTR; driveLUT[1]=0,[2]=1,[4]=2,[8]=3.
+    int number = driveLUT[(PRB >> 3) & 0xF];
     
     
     
@@ -129,7 +129,7 @@ void FloppyCycle(){
     }
     
     //If the motor needs to be on
-    if(PRB & 0x08){
+    if(PRB & 0x80){
         
         if(drive[number].motor == 0){
             //printf("Drive %d Motor On  (PRA: 0x%x) ********************************************************\n",number, PRA); printCPUContext();
