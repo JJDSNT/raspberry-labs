@@ -12,6 +12,7 @@
 #include "omega2/paula/Floppy.h"
 #include "omega2/memory/Memory.h"
 #include "omega2/shared/Omega.h"
+#include "omega2/shared/os_debug.h"
 
 static Omega_t* g_omega = NULL;
 
@@ -68,8 +69,9 @@ void omega_run_frame(void) {
 
     g_frame_count++;
 
-    // One-shot probe dump after frame 22 — capture after Copper list is configured
+    // One-shot dump after frame 22 — capture after Copper list is configured
     if (g_frame_count == 22) {
+        os_debug_dump();
         probe_dump_serial(512);
     }
 

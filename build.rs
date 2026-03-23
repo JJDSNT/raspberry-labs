@@ -49,6 +49,7 @@ fn main() {
         .file("src/emu/c/omega_stubs.c")
         // shared
         .file("src/emu/c/omega2/shared/omega_probe.c")
+        .file("src/emu/c/omega2/shared/os_debug.c")
         .file("src/emu/c/omega2/shared/EventQueue.c")
         // Chipset hub
         .file("src/emu/c/omega2/Chipset.c")
