@@ -871,12 +871,20 @@ Omega_t* InitRAM(int RAM32bitSize){
     }
 
     //Fill chipram with junk for testing purpose
+#if defined(CHIPSET_ECS)
+    // ECS: 1MB chip RAM zero-inicializado (já feito acima pelo zero-init do Omega_t)
+    // Limpa apenas os primeiros 1MB para garantir estado limpo
+    for(int i=0;i<0x100000;++i){
+        RAM24bit[i] = 0x00;
+    }
+#else
     for(int i=0;i<0x40000;++i){
         RAM24bit[i] = 0xFF;
     }
     for(int i=0x40000;i<0x200000;++i){
         RAM24bit[i] = 0x84;
     }
+#endif
 
     //copy ROM image into 24bit address space
     {

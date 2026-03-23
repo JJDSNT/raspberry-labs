@@ -1814,9 +1814,15 @@ void InitChipset(void* chipram, void* memory){
     DFFSTRT(0x18);
     ChipsetState->bitplaneFetchActive = 0;
     
-    //Put some junk in the DeniseID Reg so the softeare don't think this is ECS/OCS
-    RAM24bit[0xDFF07C] =0xFF;
-    RAM24bit[0xDFF07D] =0xFF;
+    // DeniseID (0xDFF07C): OCS=junk, ECS Denise 8373=0x00FC
+#if defined(CHIPSET_ECS)
+    RAM24bit[0xDFF07C] = 0x00;
+    RAM24bit[0xDFF07D] = 0xFC;
+#else
+    //Put some junk in the DeniseID Reg so the software don't think this is ECS/OCS
+    RAM24bit[0xDFF07C] = 0xFF;
+    RAM24bit[0xDFF07D] = 0xFF;
+#endif
     
     //Init Some Registers
     ChipsetState->DMACONR = 0;
@@ -1987,7 +1993,14 @@ uint32_t IncrementVHPOS(void){
     
     //Save Big endian versions of the VHPOS for the CPU
     uint16_t* p = (uint16_t*)&RAM24bit[0xDFF004];
-    *p = ByteSwap16(ChipsetState->VHPOS >> 16);
+    {
+        uint16_t vposr = (uint16_t)(ChipsetState->VHPOS >> 16);
+#if defined(CHIPSET_ECS)
+        // ECS Super Agnus PAL 1MB (8372A) — chip ID nos bits [15:8] do VPOSR
+        vposr = (vposr & 0x01FF) | 0x2200;
+#endif
+        *p = ByteSwap16(vposr);
+    }
     
     p = (uint16_t*)&RAM24bit[0xDFF006];
     *p = ByteSwap16(ChipsetState->VHPOS & 65535);

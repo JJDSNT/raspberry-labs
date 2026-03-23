@@ -93,6 +93,15 @@ fn main() {
         builder.flag("-mbig-endian");
     }
 
+    // Ativa AROS + chipset ECS se os headers gerados pelo gen_rom.py existirem
+    let aros_main = std::path::Path::new("src/emu/c/omega2/aros_main.h");
+    let aros_ext  = std::path::Path::new("src/emu/c/omega2/aros_ext.h");
+    if aros_main.exists() && aros_ext.exists() {
+        builder.define("USE_AROS",    None);
+        builder.define("CHIPSET_ECS", None);
+        println!("cargo:warning=AROS ROM headers found — building with ECS chipset");
+    }
+
     builder.compile("tinyusb");
 
     // Garante inclusão completa da biblioteca mesmo com --gc-sections
