@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include "omega_host.h"
 #include "omega2/shared/omega_probe.h"
-#include "omega2/shared/Scheduler.h"
+#include "omega2/agnus/Scheduler.h"
 #include "omega2/cpu/m68k.h"
 #include "omega2/Chipset.h"
 #include "omega2/cia/CIA.h"
