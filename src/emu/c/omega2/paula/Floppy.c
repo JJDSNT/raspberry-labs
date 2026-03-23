@@ -451,31 +451,73 @@ void ADFTrack2MFMTrack(uint8_t* adfTrack,int cylinder, int side, uint32_t addres
     
 }
 
-unsigned int FloppyCountdown = 0;
-int FloppyTrackReady = 0;
+// DMA cycles to simulate a track transfer (≈ 13 ms at PAL DMA rate of 3.58 MHz).
+// Amiga DDF window: ~12668 bytes / 3.58 MHz ≈ 3.5 ms minimum; we add margin.
+// Not cycle-accurate — just long enough for software to set up before interrupt fires.
+#define FLOPPY_DMA_CYCLES  46000u
+
+static unsigned int FloppyCountdown = 0;
+static int FloppyTrackReady = 0;
+
+// Helper: store a 16-bit value into chipram read registers using ByteSwap
+// (BigEndianRead byte-swaps on readback, so we pre-swap on write).
+static inline void floppy_write_reg16(uint8_t* chipram, uint32_t addr, uint16_t val) {
+    uint16_t* p = (uint16_t*)&chipram[addr];
+    *p = (uint16_t)((val >> 8) | (val << 8));   // ByteSwap16 inline
+}
 
 void FloppyExecute(Chipset_t* ChipsetState){
     uint16_t* DSKLEN = (uint16_t*)&ChipsetState->chipram[0xDFF024];
 
+    if(!(*DSKLEN & 0x8000)){
+        return;  // DMA not enabled
+    }
 
-    if(*DSKLEN & 0x8000){
-        uint32_t* address = (uint32_t*)&ChipsetState->chipram[0xDFF020];
+    uint32_t* address = (uint32_t*)&ChipsetState->chipram[0xDFF020];
+    uint16_t  dsklen_val = *DSKLEN;
+    int       write_mode = (dsklen_val >> 14) & 1;  // bit 14: WRITE
 
+    if(FloppyTrackReady == 0){
+        probe_emit(EVT_FLOPPY_CMD, dsklen_val, *address);
 
-        if(FloppyTrackReady==0){
-            probe_emit(EVT_FLOPPY_CMD, *DSKLEN, *address);
-            FloppyReadTrack(*address, *DSKLEN & 0x3FFF);
-            FloppyTrackReady = 1;
-            FloppyCountdown = (*DSKLEN);
+        uint16_t bytr_val = 0x2000;  // DMAON (bit 13)
+
+        if(!write_mode){
+            // Read: encode ADF track → MFM into DMA buffer
+            FloppyReadTrack(*address, dsklen_val & 0x3FFF);
+
+            // ADKCON bit 10 = WORDSYNC: fire DSKSYNC interrupt and set WORDSYNC
+            // status in DSKBYTR (bit 11 = 0x0800) since MFM stream has sync word.
+            uint16_t adkcon = *(uint16_t*)&ChipsetState->chipram[0xDFF09E];
+            if(adkcon & 0x0400){
+                bytr_val |= 0x0800;  // WORDSYNC
+                WriteChipsetWord(0xDFF09C, 0x9000); // DSKSYNC interrupt (INTREQ bit 12)
+            }
         }
-        
-        FloppyCountdown -= 1; // Emulate the read delay
-        if(FloppyCountdown == 0){
-            WriteChipsetWord(0xDFF09C, 0x8002); // Generate a disk block finished interrupt
-            *DSKLEN &= 0x7FFF; //Clear the DISK DMA Enable Flag..
-            *address += (*DSKLEN & 0x3FFF) << 1; // Pointer incremented by the byte length.
-            FloppyTrackReady = 0;
+
+        floppy_write_reg16(ChipsetState->chipram, 0xDFF01A, bytr_val);
+        FloppyTrackReady  = 1;
+        FloppyCountdown   = FLOPPY_DMA_CYCLES;
+    }
+
+    if(FloppyCountdown > 0) FloppyCountdown--;
+
+    if(FloppyCountdown == 0){
+        uint16_t len = dsklen_val & 0x3FFF;
+
+        // Clear DMAON in DSKBYTR
+        floppy_write_reg16(ChipsetState->chipram, 0xDFF01A, 0x0000);
+
+        // Clear DMA enable bit in DSKLEN
+        *DSKLEN &= 0x7FFF;
+
+        if(!write_mode){
+            // Advance DMA pointer by byte length of transfer
+            *address += (uint32_t)len << 1;
         }
-        
+
+        // Generate disk block done interrupt (INTREQ bit 1)
+        WriteChipsetWord(0xDFF09C, 0x8002);
+        FloppyTrackReady = 0;
     }
 }
