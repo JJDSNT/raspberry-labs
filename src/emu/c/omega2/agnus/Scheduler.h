@@ -15,9 +15,10 @@
 // Slot IDs — one per chipset subsystem, fired in order when same cycle
 // ---------------------------------------------------------------------------
 typedef enum {
-    SLOT_CIA = 0,   // CIA-A + CIA-B timers + Floppy  (E-clock, every 5 DMA)
-    SLOT_DMA = 1,   // Copper, Blitter, Bitplane, Sprite DMA  (every DMA cycle)
-    SLOT_IRQ = 2,   // Deferred interrupt check
+    SLOT_CIA   = 0,   // CIA-A + CIA-B timers + Floppy  (E-clock, every 5 DMA)
+    SLOT_DMA   = 1,   // Copper, Blitter, Bitplane, Sprite DMA  (every DMA cycle)
+    SLOT_IRQ   = 2,   // Deferred interrupt check
+    SLOT_AUDIO = 3,   // Paula audio DMA — 4 channels, fires every AUD_SAMPLE_PERIOD
     SLOT_COUNT
 } SlotID_t;
 

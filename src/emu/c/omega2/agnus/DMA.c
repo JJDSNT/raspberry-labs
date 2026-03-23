@@ -18,6 +18,7 @@
 #include "Copper.h"
 #include "Bitplane.h"
 #include "Denise.h"
+#include "Paula.h"
 
 /*
 typedef struct{
@@ -97,14 +98,6 @@ void DMAExecute(void* address, uint32_t* framebuffer){
     IncrementVHPOS(); //Increment the Display beam position
     g_probe_cycle = ChipsetState->DMACycles;
     g_probe_vpos  = (uint16_t)(ChipsetState->VHPOS >> 8);
-    
-    // Audio 0 interrupt: only fire when both master DMA and AUD0EN are set
-    if((ChipsetState->DMACONR & 0x201) == 0x201){  // bit9=DMAEN + bit0=AUD0EN both set
-        uint16_t AUD0LEN = ChipsetState->chipram[0xDC00A4];
-        if(AUD0LEN == 0){
-            ChipsetState->WriteWord[0x9C](0x8080); //Generate an AUD0 interupt
-        }
-    }
     
     //DMA disabled
     if( !(ChipsetState->DMACONR & 0x200)){
@@ -245,4 +238,5 @@ static void sched_dma_handler(void) {
 void sched_dma_init(void) {
     sched_schedule(SLOT_CIA, ECLOCK_PERIOD, sched_cia_handler);
     sched_schedule(SLOT_DMA, 1,             sched_dma_handler);
+    sched_audio_init();  // arms SLOT_AUDIO and initialises Paula state
 }

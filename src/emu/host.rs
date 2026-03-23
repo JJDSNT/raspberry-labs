@@ -102,6 +102,16 @@ pub extern "C" fn omega_host_log(msg: *const core::ffi::c_char) {
     }
 }
 
+/// Chamado pelo emulador com um par de amostras de áudio PCM estéreo.
+/// No-op por enquanto — o driver PWM/I2S para Pi 3 ainda não está implementado.
+#[no_mangle]
+pub extern "C" fn omega_host_audio_sample(
+    _left:  core::ffi::c_short,
+    _right: core::ffi::c_short,
+) {
+    // TODO: feed into Pi 3 PWM audio ring buffer when audio driver is ready
+}
+
 /// Chamado pelo TinyUSB HID (omega_input.c) para enfileirar um evento de tecla.
 #[no_mangle]
 pub extern "C" fn omega_host_push_key(scancode: u8, pressed: core::ffi::c_int) {

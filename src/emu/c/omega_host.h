@@ -23,6 +23,10 @@ void omega_host_push_key(uint8_t scancode, int pressed);
 // Input: retira um evento da fila. Retorna 1 se havia evento, 0 se vazia.
 int omega_host_poll_key(uint8_t* scancode, int* pressed);
 
+// Audio: submit one stereo sample pair to the host output buffer.
+// left/right are signed 16-bit PCM; host may silently drop if no audio HW.
+void omega_host_audio_sample(int16_t left, int16_t right);
+
 // ROM: ponteiro e tamanho carregados do SD card pelo kernel.
 // Retorna NULL/0 se nenhuma ROM foi carregada (usa built-in como fallback).
 const uint8_t* omega_host_rom_ptr(void);
