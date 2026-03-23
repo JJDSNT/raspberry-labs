@@ -54,6 +54,7 @@ typedef struct{
     
     uint32_t bitplaneFetchActive;
     uint32_t Colour[32];
+    uint32_t ham_color;  // Denise: HAM persistent color, reset at display-window start each line
     uint8_t* chipram;
     uint32_t VSTOP;
     uint32_t HSTART;

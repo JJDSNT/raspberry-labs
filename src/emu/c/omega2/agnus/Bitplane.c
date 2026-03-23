@@ -398,28 +398,26 @@ void BitplaneExecuteHires(Chipset_t* ChipsetState){
                         
                         if(ChipsetState->planeCount > 3){
                             //Bitplane4
-                            BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];  // get BLP4PT register
-                            Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                            *BP += 2;                                                       // increment register
-                            P2C4(ChipsetState->PixelBuffer, *Data);    //Planar to Chunky
-                            /*
+                            BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];
+                            Data = (uint16_t*)&ChipsetState->chipram[*BP];
+                            *BP += 2;
+                            P2C4(ChipsetState->PixelBuffer, *Data);
+
                             if(ChipsetState->planeCount > 4){
                                 //Bitplane5
-                                BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F0];  // get BLP5PT register
-                                Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                                *BP += 2;                                                       // increment register
-                                P2C5(ChipsetState->PixelBuffer, *Data);    //Planar to Chunky
-                                
+                                BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F0];
+                                Data = (uint16_t*)&ChipsetState->chipram[*BP];
+                                *BP += 2;
+                                P2C5(ChipsetState->PixelBuffer, *Data);
+
                                 if(ChipsetState->planeCount > 5){
                                     //Bitplane6
-                                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F4];  // get BLP6PT register
-                                    Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                                    *BP += 2;                                                       // increment register
-                                    P2C6(ChipsetState->PixelBuffer, *Data);    //Planar to Chunky
-                                    
+                                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F4];
+                                    Data = (uint16_t*)&ChipsetState->chipram[*BP];
+                                    *BP += 2;
+                                    P2C6(ChipsetState->PixelBuffer, *Data);
                                 }
                             }
-                             */
                         }
                     }
                 }
@@ -440,47 +438,32 @@ void BitplaneExecuteHires(Chipset_t* ChipsetState){
                 int16_t* BPLMOD1 = (int16_t*)&ChipsetState->chipram[0xDFF108];
                 int16_t* BPLMOD2 = (int16_t*)&ChipsetState->chipram[0xDFF10A];
                 
-                //need to add the Bitplane modulus if there is one.
-                if(*BPLMOD1 !=0){
-                    
+                if(*BPLMOD1 != 0 || *BPLMOD2 != 0){
                     uint32_t* BP;
-                    uint16_t* Data;
-                
-                    //Bitplane1
-                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E0];  // get BLP1PT register
-                    Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+
+                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E0];
                     *BP += *BPLMOD1;
-                    
-                    //Bitplane2
-                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E4];  // get BLP2PT register
-                    Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+
+                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E4];
                     *BP += *BPLMOD2;
-                    
-                    if(ChipsetState->planeCount >2){
-                        //Bitplane3
-                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E8];  // get BLP3PT register
-                        Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+
+                    if(ChipsetState->planeCount > 2){
+                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E8];
                         *BP += *BPLMOD1;
-                    
-                        //Bitplane4
-                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];  // get BLP4PT register
-                        Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+
+                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];
                         *BP += *BPLMOD2;
-                    
-                        /*
-                     //Bitplane5
-                     BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F0];  // get BLP5PT register
-                     Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                     *BP += *BPLMOD1;
-                    
-                     //Bitplane6
-                     BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F4];  // get BLP6PT register
-                     Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                     *BP += *BPLMOD2;
-                     */
+
+                        if(ChipsetState->planeCount > 4){
+                            BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F0];
+                            *BP += *BPLMOD1;
+
+                            BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F4];
+                            *BP += *BPLMOD2;
+                        }
                     }
                 }
-                
+
             }
             
         
@@ -488,41 +471,36 @@ void BitplaneExecuteHires(Chipset_t* ChipsetState){
         
         
         
-        //Now We need the display code, Denise displays the data independently of the Agnus fetch
+        // Display output — Denise (hires path, no HAM/EHB in hires mode).
         if(ChipsetState->planeCount > 0){
-            ChipsetState->displayCountdown -=1;
+            ChipsetState->displayCountdown -= 1;
             int HPOS;
 
             uint16_t* BPLCON1 = (uint16_t*) &ChipsetState->chipram[0xDFF102];
             int shift = *BPLCON1 & 0xF;
-        
 
-            for(int i=0;i<2;++i){
+            for(int i = 0; i < 2; ++i){
                 HPOS = (((ChipsetState->VHPOS & 0xFF) << 1) | i);
-            
+
                 if( HPOS == ((*DIWSTRT & 0xFF) - 4 - shift)){
                     ChipsetState->displayCountdown = 0;
                 }
-    
-                if( HPOS == ((*DIWSTOP & 0xFF) | 0x100) - 8  - shift){
+
+                if( HPOS == ((*DIWSTOP & 0xFF) | 0x100) - 8 - shift){
                     ChipsetState->displayCountdown = -1;
                 }
-            
-                
-                    if(ChipsetState->displayCountdown == 0){
 
-                        ChipsetState->displayCountdown = 4;
-                        for(int i = 0; i < 16; ++i){
-                            ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex+i] = ChipsetState->Colour[ChipsetState->PixelBuffer[i]];
-                        }
-                        ChipsetState->FrameBufferLineIndex += 16;
-
+                if(ChipsetState->displayCountdown == 0){
+                    ChipsetState->displayCountdown = 4;
+                    for(int j = 0; j < 16; ++j){
+                        ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex + j] =
+                            ChipsetState->Colour[ChipsetState->PixelBuffer[j] & 0x1Fu];
                     }
-            
-            
+                    ChipsetState->FrameBufferLineIndex += 16;
+                }
             }
         }
-    
+
     }
 
 
@@ -601,9 +579,9 @@ void BitplaneExecuteLores(Chipset_t* ChipsetState){
                         //Bitplane3
                         BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E8];  // get BLP3PT register
                         Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                        *BP += 0;                                                       // increment register
+                        *BP += 2;                                                       // increment register
                         P2C3(ChipsetState->PixelBuffer, *Data);    //Planar to Chunky
-                        
+
                         if(ChipsetState->planeCount > 3){
                             //Bitplane4
                             BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];  // get BLP4PT register
@@ -645,106 +623,110 @@ void BitplaneExecuteLores(Chipset_t* ChipsetState){
                 int16_t* BPLMOD1 = (int16_t*)&ChipsetState->chipram[0xDFF108];
                 int16_t* BPLMOD2 = (int16_t*)&ChipsetState->chipram[0xDFF10A];
                 
-                //need to add the Bitplane modulus if there is one.
-                if(*BPLMOD1 !=0){
-                    
-                    uint32_t* BP;
-                    uint16_t* Data;
-                
-                    //Bitplane1
-                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E0];  // get BLP1PT register
-                    Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                    *BP += *BPLMOD1;
-                    
+                // Apply bitplane modulos (odd planes use BPLMOD1, even use BPLMOD2).
+                // Check each modulo independently — mod2 may be non-zero even when mod1=0.
+                if(*BPLMOD1 != 0 || *BPLMOD2 != 0){
 
-                    //Bitplane2
-                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E4];  // get BLP2PT register
-                    Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+                    uint32_t* BP;
+
+                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E0];
+                    *BP += *BPLMOD1;
+
+                    BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E4];
                     *BP += *BPLMOD2;
-                    
-                    if(ChipsetState->planeCount >2){
-                        //Bitplane3
-                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E8];  // get BLP3PT register
-                        Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+
+                    if(ChipsetState->planeCount > 2){
+                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0E8];
                         *BP += *BPLMOD1;
-                    
-                        //Bitplane4
-                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];  // get BLP4PT register
-                        Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
+
+                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0EC];
                         *BP += *BPLMOD2;
-                    
-                        //Bitplane5
-                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F0];  // get BLP5PT register
-                        Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                        *BP += *BPLMOD1;
-                    
-                        //Bitplane6
-                        BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F4];  // get BLP6PT register
-                        Data = (uint16_t*)&ChipsetState->chipram[*BP];     // Get the data pointed to by register
-                        *BP += *BPLMOD2;
+
+                        if(ChipsetState->planeCount > 4){
+                            BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F0];
+                            *BP += *BPLMOD1;
+
+                            BP  = (uint32_t*) &ChipsetState->chipram[0xDFF0F4];
+                            *BP += *BPLMOD2;
+                        }
                     }
                 }
-                
+
             }
-            
+
             ChipsetState->needsRedraw = 1;
         
         }
         
         
         
-        //Now We need the display code, Denise displays the data independently of the Agnus fetch
-        if(ChipsetState->planeCount >0){
-            ChipsetState->displayCountdown -=1;
+        // Display output — Denise reads PixelBuffer and outputs to framebuffer.
+        // Runs independently of the Agnus DMA fetch above (different window: DIW vs DDF).
+        if(ChipsetState->planeCount > 0){
+            ChipsetState->displayCountdown -= 1;
             int HPOS;
 
-            uint16_t* BPLCON1 = (uint16_t*) &ChipsetState->chipram[0xDFF102];
+            uint16_t* BPLCON0_ptr = (uint16_t*) &ChipsetState->chipram[0xDFF100];
+            uint16_t  bplcon0     = *BPLCON0_ptr;
+            uint16_t* BPLCON1     = (uint16_t*) &ChipsetState->chipram[0xDFF102];
             int shift = *BPLCON1 & 0xF;
-            for(int i=0;i<2;++i){
+
+            // Special color modes (lores only; HAM is undefined in hires)
+            int ham = ((bplcon0 >> 11) & 1) && (ChipsetState->planeCount == 6);
+            int ehb = !ham && (ChipsetState->planeCount == 6);
+
+            for(int i = 0; i < 2; ++i){
                 HPOS = (((ChipsetState->VHPOS & 0xFF) << 1) | i);
-            
+
                 if( HPOS == ((*DIWSTRT & 0xFF) - 8 - shift)){
                     ChipsetState->displayCountdown = 0;
+                    ChipsetState->ham_color = ChipsetState->Colour[0]; // reset HAM carry at display start
                 }
-    
+
                 if( HPOS == ((*DIWSTOP & 0xFF) | 0x100) - 16 - shift){
                     ChipsetState->displayCountdown = -1;
                 }
-            
-            
-           
 
                 if(ChipsetState->displayCountdown == 0){
                     ChipsetState->displayCountdown = 8;
-                    
-                    if(ChipsetState->planeCount<6){
-                        for(int i = 0; i < 16; i += 1){
-                            uint32_t colour = ChipsetState->Colour[ChipsetState->PixelBuffer[i]];
-                            ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex+(i << 1)] = colour;
-                            ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex+(i << 1)+1] = colour;
-                        }
-                    }else{
-                        //EHB
-                        for(int i = 0; i < 16; i += 1){
-                            uint32_t colour = ChipsetState->Colour[ChipsetState->PixelBuffer[i] & 0x1F];
-                            
-                            if(ChipsetState->PixelBuffer[i] > 31){
-                                colour = colour >> 1;
-                                colour = colour & 0xFF7F7F7F;
-                            }
-                            
-                            ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex+(i << 1)] = colour;
-                            ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex+(i << 1)+1] = colour;
-                        }
-                        
-                    }
-                    
-                    ChipsetState->FrameBufferLineIndex += 32;
 
+                    for(int j = 0; j < 16; j++){
+                        uint8_t  idx = ChipsetState->PixelBuffer[j];
+                        uint32_t colour;
+
+                        if(ham){
+                            // HAM6: bits[5:4] = control, bits[3:0] = data
+                            uint8_t ctrl = (idx >> 4) & 0x3u;
+                            uint8_t data = idx & 0xFu;
+                            switch(ctrl){
+                                case 0: colour = ChipsetState->Colour[data]; break;
+                                case 1: // hold, modify blue
+                                    colour = (ChipsetState->ham_color & 0xFFFFFF00u)
+                                           | ((uint32_t)data << 4) | (uint32_t)data;
+                                    break;
+                                case 2: // hold, modify red
+                                    colour = (ChipsetState->ham_color & 0xFF00FFFFu)
+                                           | ((uint32_t)data << 20) | ((uint32_t)data << 16);
+                                    break;
+                                default: // case 3: hold, modify green
+                                    colour = (ChipsetState->ham_color & 0xFFFF00FFu)
+                                           | ((uint32_t)data << 12) | ((uint32_t)data << 8);
+                                    break;
+                            }
+                            ChipsetState->ham_color = colour;
+                        } else if(ehb && (idx >= 32)){
+                            // EHB: upper 32 colors are half-bright versions of lower 32
+                            colour = (ChipsetState->Colour[idx & 0x1Fu] >> 1) & 0xFF7F7F7Fu;
+                        } else {
+                            colour = ChipsetState->Colour[idx & 0x1Fu];
+                        }
+
+                        ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex + (j << 1)]     = colour;
+                        ChipsetState->FrameBufferLine[ChipsetState->FrameBufferLineIndex + (j << 1) + 1] = colour;
+                    }
+
+                    ChipsetState->FrameBufferLineIndex += 32;
                 }
-                
-            
-           
             }
         }
     }
