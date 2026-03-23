@@ -10,6 +10,7 @@
 #include "m68k.h"
 #include "CIA.h"
 #include "Beam.h"
+#include "Scheduler.h"
 #include "omega_probe.h"
 #include "omega_host.h"
 
@@ -1881,6 +1882,19 @@ void WriteChipsetLong(unsigned int address, unsigned int value){
 }
 
 
+// ---------------------------------------------------------------------------
+// SLOT_VBL handler — fires via the scheduler at the DMA cycle the beam wraps.
+// Decouples VBL interrupt dispatch from the per-cycle beam tracking loop.
+// ---------------------------------------------------------------------------
+static void sched_vbl_handler(void) {
+    CIAATOD();                                              // CIA-A frame counter
+    ChipsetState->WriteWord[0x9C](0x8020);                 // VBL interrupt (INTREQ bit 5)
+    probe_emit(EVT_VBL, m68k_get_reg(NULL, M68K_REG_PC), ChipsetState->DMACONR);
+    probe_emit(EVT_CPU_STOP, m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_SP));
+    ChipsetState->WriteWord[0x88](0);                      // Copper: restart from COP1LC
+    ChipsetState->VBL = 1;                                 // notify host: frame complete
+}
+
 uint32_t IncrementVHPOS(void){
 
     ChipsetState->VBL = 0;
@@ -1901,14 +1915,9 @@ uint32_t IncrementVHPOS(void){
 
             ChipsetState->bitplaneFetchActive = 0;
 
-            CIAATOD(); // increment CIA-A VBL counter
-
-            ChipsetState->WriteWord[0x9C](0x8020); // VBL interrupt
-            probe_emit(EVT_VBL, m68k_get_reg(NULL, M68K_REG_PC), ChipsetState->DMACONR);
-            probe_emit(EVT_CPU_STOP, m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_SP));
-
-            ChipsetState->WriteWord[0x88](0); // reset Copper to COP1LC
-            ChipsetState->VBL = 1;            // notify host: frame complete
+            // Schedule VBL event at delta=0: fires in this same sched_advance()
+            // pass, after SLOT_DMA (slot 1 < slot 4), giving correct ordering.
+            sched_schedule(SLOT_VBL, 0, sched_vbl_handler);
         }
     }
 

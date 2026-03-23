@@ -19,6 +19,7 @@ typedef enum {
     SLOT_DMA   = 1,   // Copper, Blitter, Bitplane, Sprite DMA  (every DMA cycle)
     SLOT_IRQ   = 2,   // Deferred interrupt check
     SLOT_AUDIO = 3,   // Paula audio DMA — 4 channels, fires every AUD_SAMPLE_PERIOD
+    SLOT_VBL   = 4,   // VBL event — scheduled by IncrementVHPOS on frame wrap
     SLOT_COUNT
 } SlotID_t;
 
