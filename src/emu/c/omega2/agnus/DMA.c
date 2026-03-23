@@ -8,6 +8,7 @@
 #include "DMA.h"
 #include <stdint.h>
 
+#include "Scheduler.h"
 #include "omega_probe.h"
 #include "Chipset.h"
 #include "Blitter.h"
@@ -17,9 +18,6 @@
 #include "Copper.h"
 #include "Bitplane.h"
 #include "Denise.h"
-
-
-int EclockCountdown = -1;
 
 /*
 typedef struct{
@@ -53,34 +51,28 @@ void SpriteP2C2(uint8_t* buffer, uint16_t source){
 
 }
 
-void DMAExecute(void* address, uint32_t* framebuffer){
-        
-    Chipset_t* ChipsetState = address;
-    ChipsetState->DMACycles += 1;
-    
-    //The CPU runs at 7.15909Mhz
-    //The DMA runs at 3.579545 Mhz
-    //The EClock runs at 0.715909Mhz
-    //So the Eclock advances exactly every 5 DMA cycles
-    // the execution ratio of CPU:DMA:CIA is 10:5:1
-   
-    /*
-     //Old, Pre DMA cycle counter EClock
-    EclockCountdown -= 1;
-    if(EclockCountdown < 0){
+// ---------------------------------------------------------------------------
+// SLOT_CIA handler — CIA-A/B timers + floppy, fires every ECLOCK_PERIOD DMA
+// ---------------------------------------------------------------------------
 
-        EclockCountdown = 4;
-        RunCIACycle();
-        ChipsetState->EClockcycles += 1;
-    }
-    */
-    
-    
-    if((ChipsetState->DMACycles % 5) == 0){
-        RunCIACycle();
-        FloppyCycle();
-        ChipsetState->EClockcycles += 1;
-    }
+static void sched_cia_handler(void) {
+    extern Chipset_t* ChipsetState;
+    RunCIACycle();
+    FloppyCycle();
+    ChipsetState->EClockcycles++;
+    sched_schedule(SLOT_CIA, ECLOCK_PERIOD, sched_cia_handler);
+}
+
+// ---------------------------------------------------------------------------
+// SLOT_DMA handler — all per-DMA-cycle chipset activity
+// ---------------------------------------------------------------------------
+
+static void sched_dma_handler(void);  // forward declaration
+
+void DMAExecute(void* address, uint32_t* framebuffer){
+
+    Chipset_t* ChipsetState = address;
+    ChipsetState->DMACycles = sched_clock();
 
     
     /*
@@ -231,8 +223,26 @@ void DMAExecute(void* address, uint32_t* framebuffer){
  Each position is 4 pixels, so the index increases by 4
  From the DFFSTRT value the display needs to update every 4 DMA cycles (write 16 pixels to the screen) and advance the
  plane counter by 1, in lowres mode the plane counter needs to advance every 8 DMA cycles.
- 
- 
- 
+
+
+
  */
 
+// ---------------------------------------------------------------------------
+// sched_dma_handler — called by scheduler every DMA cycle via SLOT_DMA
+// ---------------------------------------------------------------------------
+
+static void sched_dma_handler(void) {
+    extern Chipset_t* ChipsetState;
+    DMAExecute(ChipsetState, NULL);
+    sched_schedule(SLOT_DMA, 1, sched_dma_handler);
+}
+
+// ---------------------------------------------------------------------------
+// sched_dma_init — call once after chipset init to arm both slots
+// ---------------------------------------------------------------------------
+
+void sched_dma_init(void) {
+    sched_schedule(SLOT_CIA, ECLOCK_PERIOD, sched_cia_handler);
+    sched_schedule(SLOT_DMA, 1,             sched_dma_handler);
+}

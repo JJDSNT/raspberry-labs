@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "omega_host.h"
 #include "omega2/shared/omega_probe.h"
+#include "omega2/agnus/Scheduler.h"
 #include "omega2/cpu/m68k.h"
 #include "omega2/Chipset.h"
 #include "omega2/cia/CIA.h"
@@ -44,6 +45,9 @@ void omega_init(void) {
 
     FloppyInit();
 
+    sched_init();
+    sched_dma_init();
+
     m68k_init();
     m68k_set_cpu_type(M68K_CPU_TYPE_68000);
     m68k_pulse_reset();
@@ -58,13 +62,18 @@ void omega_run_frame(void) {
 
     Chipset_t* cs = ChipsetState;
 
-    uint32_t iters = 0;
+    // Each DMA cycle = CPU_CYCLES_PER_DMA (2) CPU cycles.
+    // Run in batches of SCHED_BATCH DMA cycles for performance.
+    // Watchdog: abort frame if we exceed ~1M DMA cycles without VBL
+    // (1M / 71k cycles-per-frame ≈ 14 PAL frames — enough to catch hangs).
+    uint64_t frame_start = sched_clock();
     while (cs->VBL == 0) {
-        m68k_execute(128);
-        DMAExecute(ChipsetState, NULL);
+        m68k_execute(SCHED_BATCH * CPU_CYCLES_PER_DMA);
+        sched_advance_n(SCHED_BATCH);
 
-        if (++iters > 5000000) {
-            probe_emit(EVT_WATCHDOG, iters, m68k_get_reg(NULL, M68K_REG_PC));
+        if ((sched_clock() - frame_start) > 1000000) {
+            probe_emit(EVT_WATCHDOG, (uint32_t)(sched_clock() - frame_start),
+                       m68k_get_reg(NULL, M68K_REG_PC));
             probe_dump_serial(512);
             break;
         }
