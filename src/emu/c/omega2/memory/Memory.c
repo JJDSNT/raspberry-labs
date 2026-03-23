@@ -799,6 +799,30 @@ unsigned int cpu_read_byte(unsigned int address){
         return p;
     }
 
+    // CIA-A TOD read latch: reading TODH freezes counter (CIAATOD stops updating
+    // chipram bytes); reading TODL returns the frozen value and releases the latch.
+    // This guarantees the 68K reads a consistent 24-bit snapshot across 3 byte reads.
+    if(address == CIA_ATODH) {
+        CIAState->ATODLatch = 1;        // freeze — CIAATOD will skip updates
+        return RAM24bit[address];
+    }
+    if(address == CIA_ATODL) {
+        uint8_t v = RAM24bit[address];
+        CIAState->ATODLatch = 0;        // release — resume counting
+        return v;
+    }
+
+    // CIA-B TOD (HSYNC counter) — same latch protocol
+    if(address == CIA_BTODH) {
+        CIAState->BTODLatch = 1;
+        return RAM24bit[address];
+    }
+    if(address == CIA_BTODL) {
+        uint8_t v = RAM24bit[address];
+        CIAState->BTODLatch = 0;
+        return v;
+    }
+
     return RAM24BitDespatch(address, m68kByte, m68kRead, 0);
 }
 
