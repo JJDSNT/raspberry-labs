@@ -22,6 +22,9 @@ typedef struct{
     int stepReady;
     int empty;
     int diskChanged;    // 1 = /DSKCHNG asserted LOW; cleared by a head step
+    int idCount;        // number of select/deselect cycles since last motor-on
+    uint32_t idData;    // 32-bit drive ID shifted onto /DSKCHNG when motor is off
+                        // 0xFFFFFFFF = standard DD drive (no ID chip, pull-up)
     uint8_t mask;
     uint8_t* ADF;
     uint8_t* RAW;
@@ -44,6 +47,8 @@ void FloppyInit(void){
     drive[0].stepReady = 1;
     drive[0].empty = 1;
     drive[0].diskChanged = 0;
+    drive[0].idCount = 0;
+    drive[0].idData  = 0xFFFFFFFF; // standard DD drive
 
     drive[1].state = idcode;
     drive[1].motor = 0;
@@ -53,6 +58,8 @@ void FloppyInit(void){
     drive[1].stepReady = 1;
     drive[1].empty = 1;
     drive[1].diskChanged = 0;
+    drive[1].idCount = 0;
+    drive[1].idData  = 0xFFFFFFFF;
 
     drive[2].state = idcode;
     drive[2].motor = 0;
@@ -62,6 +69,8 @@ void FloppyInit(void){
     drive[2].stepReady = 1;
     drive[2].empty = 1;
     drive[2].diskChanged = 0;
+    drive[2].idCount = 0;
+    drive[2].idData  = 0xFFFFFFFF;
 
     drive[3].state = idcode;
     drive[3].motor = 0;
@@ -71,6 +80,8 @@ void FloppyInit(void){
     drive[3].stepReady = 1;
     drive[3].empty = 1;
     drive[3].diskChanged = 0;
+    drive[3].idCount = 0;
+    drive[3].idData  = 0xFFFFFFFF;
     
     activeDrive = -1;
 }
@@ -111,11 +122,14 @@ void FloppyCycle(){
     
     //No drive Selected
     if(number == -1){
-        
         if(activeDrive != -1){
             ClearDriveReady();
+            // Rising edge of /SEL (deselect) with motor OFF advances the ID
+            // shift counter — mirrors vAmiga DiskDrive ID sequence behaviour.
+            if(drive[activeDrive].motor == 0){
+                drive[activeDrive].idCount++;
+            }
             activeDrive = number;
-           // printf("\n");
         }
         return;
     }
@@ -142,7 +156,7 @@ void FloppyCycle(){
 
             drive[number].state = 1;   //Disk ready immediatly
             drive[number].motor = 1;
-            
+            drive[number].idCount = 0; // motor-on resets the ID shift counter
             drive[number].delayCountdown = 800;
         }
         
@@ -211,12 +225,16 @@ void FloppyCycle(){
     
 
     // /DSKCHNG (CIA-A PRA bit2, active-LOW):
-    // LOW  = change pending (insert/eject occurred, not yet stepped)
-    // HIGH = stable (no pending change)
-    if(drive[number].diskChanged){
-        SetDiskChange();    // bit2 = 0
-    }else{
-        ClearDiskChange();  // bit2 = 1
+    // Motor OFF → ID mode: output current ID bit (MSB first, advances on deselect)
+    // Motor ON  → normal mode: reflects diskChanged flag
+    if(!(PRB & 0x80)){
+        // ID sequence: bit 31 on first selection, shifting right each deselect cycle
+        int idBit = (drive[number].idData >> (31 - (drive[number].idCount & 31))) & 1;
+        if(idBit) ClearDiskChange();  // 1 → /DSKCHNG HIGH
+        else       SetDiskChange();   // 0 → /DSKCHNG LOW
+    } else {
+        if(drive[number].diskChanged) SetDiskChange();
+        else                          ClearDiskChange();
     }
     
     //Set Zero Flag
