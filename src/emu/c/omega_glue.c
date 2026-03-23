@@ -6,6 +6,7 @@
 #include "omega_host.h"
 #include "omega2/shared/omega_probe.h"
 #include "omega2/agnus/Scheduler.h"
+#include "omega2/agnus/Beam.h"
 #include "omega2/cpu/m68k.h"
 #include "omega2/Chipset.h"
 #include "omega2/cia/CIA.h"
@@ -45,6 +46,7 @@ void omega_init(void) {
 
     FloppyInit();
 
+    beam_init();
     sched_init();
     sched_dma_init();
 

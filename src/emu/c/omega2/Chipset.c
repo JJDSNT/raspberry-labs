@@ -9,6 +9,7 @@
 #include "Memory.h"
 #include "m68k.h"
 #include "CIA.h"
+#include "Beam.h"
 #include "omega_probe.h"
 #include "omega_host.h"
 
@@ -47,14 +48,19 @@ void DSKLEN(uint16_t value){
     return;
 }
 
-// 2A
+// 2A — VPOSW: bit0 = VPOS[8], bit15 = LOF write
 void VPOSW(uint16_t value){
-    ChipsetState->VHPOS = (value << 16) | (ChipsetState->VHPOS & 65535);
+    // bit0 of value = VPOS[8] (MSB of 9-bit vertical counter)
+    g_beam.v = (g_beam.v & 0xFF) | ((value & 0x01) << 8);
+    g_beam.lof = (value >> 15) & 1;
+    ChipsetState->VHPOS = beam_vhpos();
 }
 
-// 2C
+// 2C — VHPOSW: bits[15:8] = VPOS[7:0], bits[7:0] = HPOS[7:0]
 void VHPOSW(uint16_t value){
-    ChipsetState->VHPOS = (ChipsetState->VHPOS & 0xFFFF0000) | value;
+    g_beam.v = (g_beam.v & 0x100) | ((value >> 8) & 0xFF);
+    g_beam.h = value & 0xFF;
+    ChipsetState->VHPOS = beam_vhpos();
 }
 
 // 30
@@ -1875,59 +1881,49 @@ void WriteChipsetLong(unsigned int address, unsigned int value){
 uint32_t IncrementVHPOS(void){
 
     ChipsetState->VBL = 0;
-    
-    ChipsetState->VHPOS += 1;
 
-    
-    //Check Horizontal Position, if we are at cycle 0xE0 - 224, that is the maximum display position 800 host pixels
-    if( (ChipsetState->VHPOS & 0xFF) == 0xE0){
-        
-        CIABTOD(); //increment CIA B Horizontal Line counter
-     
-        
-        // Clear low byte (H pos to 0) and add 256 to the high byte (increment VPos)
-        ChipsetState->VHPOS = (ChipsetState->VHPOS & 0xFFFFFF00) + 0x100;
-        
-        
-        // 0x10600 is 262 NTSC vertical lines left shifted by 8 places
-        // 0x13800 is 312 PAL Vertical lines left shifted
-        if( (ChipsetState->VHPOS & 0x1FF00) == 0x13900){
-            ChipsetState->VHPOS &= 0x80000000; //Clear the VHPos counters (leave the top bit alone)
-            //ChipsetState->framebufferIndex = 0; //reset host display
-            
-            ChipsetState->bitplaneFetchActive = 0; // stop any fetches... even though there shouldn't be at this point
-            
-            CIAATOD(); //increment CIA A VBL counter
-            
-            ChipsetState->WriteWord[0x9C](0x8020); //Generate a Vertical Blank Interrupt
+    g_beam.h++;
+
+    // End of line: h reached the line boundary (227 short / 228 long)
+    if (g_beam.h >= beam_hcnt()) {
+
+        CIABTOD(); // increment CIA-B horizontal line counter
+
+        beam_eol(); // h=0, v++, toggle lol
+
+        // End of frame: v exceeded the last valid line
+        if (g_beam.v > beam_vmax()) {
+
+            beam_eof(); // v=0, frame++, toggle lof
+
+            ChipsetState->bitplaneFetchActive = 0;
+
+            CIAATOD(); // increment CIA-A VBL counter
+
+            ChipsetState->WriteWord[0x9C](0x8020); // VBL interrupt
             probe_emit(EVT_VBL, m68k_get_reg(NULL, M68K_REG_PC), ChipsetState->DMACONR);
             probe_emit(EVT_CPU_STOP, m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_SP));
 
-            //Load the Copper with COP1LC
-            ChipsetState->WriteWord[0x88](0);   //Reset Copper to location 1
-            ChipsetState->VBL =  1;             //inform Host we need a display update!
+            ChipsetState->WriteWord[0x88](0); // reset Copper to COP1LC
+            ChipsetState->VBL = 1;            // notify host: frame complete
         }
-        
-        
     }
-    
-    
-    
-    //Save Big endian versions of the VHPOS for the CPU
-    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF004];
-    {
-        uint16_t vposr = (uint16_t)(ChipsetState->VHPOS >> 16);
+
+    // Keep ChipsetState->VHPOS in sync for code that reads it directly
+    ChipsetState->VHPOS = beam_vhpos();
+
+    // Write CPU-visible beam registers (big-endian in chip RAM)
+    uint16_t vposr = beam_vposr();
 #if defined(CHIPSET_ECS)
-        // ECS Super Agnus PAL 1MB (8372A) — chip ID nos bits [15:8] do VPOSR
-        vposr = (vposr & 0x01FF) | 0x2200;
+    // ECS Super Agnus PAL 1MB (8372A) — chip ID in bits[14:8] of VPOSR
+    vposr = (vposr & 0x8001) | 0x2200;
 #endif
-        *p = ByteSwap16(vposr);
-    }
-    
+    uint16_t* p = (uint16_t*)&RAM24bit[0xDFF004];
+    *p = ByteSwap16(vposr);
+
     p = (uint16_t*)&RAM24bit[0xDFF006];
-    *p = ByteSwap16(ChipsetState->VHPOS & 65535);
-    
-    
+    *p = ByteSwap16(beam_vhposr());
+
     return 0;
 }
 
