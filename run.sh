@@ -168,12 +168,15 @@ EOF
     cat > /tmp/rpi_config.txt << 'EOF'
 arm_64bit=1
 kernel=kernel8.img
+enable_uart=1
+init_uart_clock=48000000
 # disable_overscan=1
 EOF
     mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" /tmp/rpi_config.txt "::config.txt"
 
-    # cmdline.txt — bootargs lidos pelo firmware e injetados no DTB /chosen/bootargs
-    # Escolhe demo automaticamente: omega se discos disponíveis, flame caso contrário
+    # Bootargs — mesmo mecanismo do QEMU: pré-patcha o DTB com fdtput
+    # para não depender do firmware do Pi injetar o cmdline.txt.
+    # cmdline.txt é incluído também como fallback para firmwares antigos.
     local CMDLINE="demo=flame"
     if [ -f "$DISKS_DIR/disk0.adf" ]; then
         CMDLINE="demo=omega df0=disk0.adf df1=disk1.adf"
@@ -187,6 +190,20 @@ EOF
             break  # apenas o primeiro ROM encontrado
         done
     fi
+
+    # Patcha o DTB do firmware com os bootargs (igual ao launcher QEMU)
+    local DTB_SRC="$FIRMWARE_DIR/bcm2710-rpi-3-b-plus.dtb"
+    local DTB_PATCHED_RPI="/tmp/bcm2710-rpi-3-b-plus-patched.dtb"
+    if command -v fdtput >/dev/null 2>&1 && [ -f "$DTB_SRC" ]; then
+        cp "$DTB_SRC" "$DTB_PATCHED_RPI"
+        fdtput -ts "$DTB_PATCHED_RPI" /chosen bootargs "$CMDLINE"
+        mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" "$DTB_PATCHED_RPI" "::bcm2710-rpi-3-b-plus.dtb"
+        echo "[RPI] DTB patcheado com bootargs: $CMDLINE"
+    else
+        echo "[WARN] fdtput não encontrado — usando apenas cmdline.txt"
+    fi
+
+    # cmdline.txt como fallback para firmwares antigos
     printf '%s' "$CMDLINE" > /tmp/rpi_cmdline.txt
     mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" /tmp/rpi_cmdline.txt "::cmdline.txt"
     echo "[RPI] cmdline: $CMDLINE"

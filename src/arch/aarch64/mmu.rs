@@ -130,6 +130,10 @@ pub fn init() {
         cache::isb();
         cache::tlbi_vmalle1();
 
+        // Invalida I-cache antes de habilitá-la — em hardware real o firmware
+        // pode ter deixado entradas que corrompem a execução após enable.
+        cache::ic_iallu();
+
         // Habilita MMU + D-cache + I-cache
         // Desabilita stack alignment check (SA, SA0) durante desenvolvimento
         // Em builds BE (target_endian = "big"), seta EE para data accesses em BE

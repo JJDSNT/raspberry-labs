@@ -90,6 +90,21 @@ pub fn tlbi_vmalle1() {
     }
 }
 
+/// Invalida todo o I-cache (PoU) no domínio Inner Shareable.
+/// Necessário em hardware real antes de habilitar o I-cache na MMU,
+/// para descartar entradas deixadas pelo firmware do Pi.
+#[inline(always)]
+pub fn ic_iallu() {
+    unsafe {
+        asm!(
+            "ic iallu",
+            "dsb ish",
+            "isb",
+            options(nostack, preserves_flags)
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cache — flush de linhas (clean + invalidate)
 // ---------------------------------------------------------------------------
