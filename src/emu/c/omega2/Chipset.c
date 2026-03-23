@@ -538,18 +538,16 @@ void CheckInterrupts(){
         return;
     }
 
+    // Strictly intreq & intena — matches vAmiga Paula::interruptLevel().
+    // No special-casing for VBL or PORTS: if the OS didn't enable them, they don't fire.
     uint16_t intMask = ChipsetState->INTREQR & ChipsetState->INTENAR;
 
-    // VBL (bit5) and PORTS/CIA-A (bit3) always fire when pending + master set,
-    // even if their individual INTENAR bits are clear.
-    if (ChipsetState->INTREQR & 0x20) intMask |= 0x20; // VBL  → level 3
-    if (ChipsetState->INTREQR & 0x08) intMask |= 0x08; // PORTS → level 2
-
-    // Edge-trigger: emit only when IRQ level changes (rising + falling edge).
-    // Avoids flooding when CIA-A fires PORTS every ~5 DMA cycles.
+    // Edge-trigger: emit probe only when IRQ level changes.
+    // m68k_set_irq() is always called (including 0) so Musashi sees the correct line state.
     static unsigned last_irq_level = 0;
-    if(intMask != 0){
-        unsigned level =
+    unsigned level = 0;
+    if (intMask != 0) {
+        level =
             (intMask & 8192) ? 6 :
             (intMask & 4096) ? 5 :
             (intMask & 2048) ? 5 :
@@ -563,14 +561,12 @@ void CheckInterrupts(){
             (intMask &    8) ? 2 :
             (intMask &    4) ? 1 :
             (intMask &    2) ? 1 : 1;
-        if (level != last_irq_level) {
-            probe_emit(EVT_INTR_FIRE, level, ChipsetState->INTREQR);
-            last_irq_level = level;
-        }
-        m68k_set_irq(level);
-    } else {
-        last_irq_level = 0;   // reset so next rising edge is captured
     }
+    if (level != last_irq_level) {
+        probe_emit(EVT_INTR_FIRE, level, ChipsetState->INTREQR);
+        last_irq_level = level;
+    }
+    m68k_set_irq(level);
 }
 
 // 9C
