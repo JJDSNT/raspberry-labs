@@ -1,10 +1,29 @@
 /target
 kernel8.img
-dtb/*-patched.dtb
+kernel8-be.img
+
+# SD card images (generated)
 sd.img
-disks/*.adf
+sdcard.img
+
+# Disk images (não versionados)
+disks/
+
+# DTB (todos exceto o base baixado)
+dtb/*.dtb
+
+# Firmware RPi (baixado automaticamente)
+firmware/
+
+# Arquivos gerados pelo gen_rom.py
+src/emu/c/omega2/memory/aros_main.h
+src/emu/c/omega2/memory/aros_ext.h
 src/emu/c/omega2/aros_main.h
 src/emu/c/omega2/aros_ext.h
 src/emu/rom/aros.rom
-firmware/
-sdcard.img
+
+# ROM duplicata gerada/copiada
+src/emu/c/omega2/memory/AROS.ROM
+
+# vAmiga (referência externa, não versionado)
+src/vamiga/

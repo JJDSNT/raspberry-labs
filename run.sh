@@ -14,34 +14,30 @@ CLEAN_LIGHT=0
 CLEAN_FULL=0
 BIG_ENDIAN=0
 CREATE_SD=0
-CREATE_RPI=0
 
 DISKS_DIR="./disks"
-SD_IMG="$(pwd)/sd.img"
 SDCARD_IMG="$(pwd)/sdcard.img"
 FIRMWARE_DIR="./firmware"
 
-# Firmware oficial RPi (bootado direto no hardware, não no QEMU)
+# Firmware oficial RPi
 FIRMWARE_BASE="https://github.com/raspberrypi/firmware/raw/master/boot"
 FIRMWARE_FILES="bootcode.bin start.elf fixup.dat bcm2710-rpi-3-b-plus.dtb"
 
 usage() {
-    echo "Usage: $0 [-b] [-c] [-C] [-s] [-r]"
+    echo "Usage: $0 [-b] [-c] [-C] [-s]"
     echo "  -b    build big-endian (requer cargo nightly)"
     echo "  -c    limpeza leve (remove kernel gerado e artefatos temporários)"
     echo "  -C    limpeza total (cargo clean)"
-    echo "  -s    cria/atualiza sd.img para uso no QEMU"
-    echo "  -r    build + cria sdcard.img para gravar no SD card físico do RPi"
+    echo "  -s    cria/atualiza sdcard.img (serve para QEMU e SD card físico)"
     exit 1
 }
 
-while getopts "bcCsrh" opt; do
+while getopts "bcCsh" opt; do
     case $opt in
         b) BIG_ENDIAN=1 ;;
         c) CLEAN_LIGHT=1 ;;
         C) CLEAN_FULL=1 ;;
         s) CREATE_SD=1 ;;
-        r) CREATE_RPI=1 ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -62,39 +58,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# SD card QEMU (sd.img — FAT32 sem partição, para -sd do QEMU)
-# ---------------------------------------------------------------------------
-
-create_sd_image() {
-    command -v mcopy >/dev/null 2>&1 || {
-        echo "[ERROR] mtools não encontrado"
-        echo "[HINT]  sudo apt install mtools"
-        exit 1
-    }
-
-    mkdir -p "$DISKS_DIR"
-
-    echo "[SD] Criando $SD_IMG (64 MB, FAT32)..."
-    dd if=/dev/zero of="$SD_IMG" bs=1M count=64 status=none
-    mformat -i "$SD_IMG" -F -v "OMEGA" ::
-
-    ADDED=0
-    for n in 0 1; do
-        ADF="$DISKS_DIR/disk${n}.adf"
-        if [ -f "$ADF" ]; then
-            echo "[SD] Adicionando disk${n}.adf ($(du -h "$ADF" | cut -f1))..."
-            mcopy -i "$SD_IMG" "$ADF" "::disk${n}.adf"
-            ADDED=$((ADDED + 1))
-        else
-            echo "[SD] disk${n}.adf não encontrado em $DISKS_DIR — slot vazio"
-        fi
-    done
-
-    echo "[SD] $SD_IMG pronto ($ADDED disco(s) adicionado(s))"
-}
-
-# ---------------------------------------------------------------------------
-# SD card físico RPi (sdcard.img — MBR + FAT32 com firmware de boot)
+# SD card unificado (sdcard.img — FAT32 raw, serve para QEMU e hardware RPi)
 # ---------------------------------------------------------------------------
 
 download_firmware() {
@@ -118,102 +82,78 @@ download_firmware() {
     echo "[FW] Firmware OK"
 }
 
-create_rpi_image() {
-    command -v sfdisk >/dev/null 2>&1 || {
-        echo "[ERROR] sfdisk não encontrado (util-linux)"
-        exit 1
-    }
+create_sdcard_image() {
     command -v mcopy >/dev/null 2>&1 || {
         echo "[ERROR] mtools não encontrado"
         echo "[HINT]  sudo apt install mtools"
         exit 1
     }
 
-    # Parâmetros da imagem
-    local SIZE_MB=256
-    local PART_START=8192                           # sectores (offset 4MB — padrão RPi)
-    local PART_OFFSET=$(( PART_START * 512 ))       # bytes
-    local TOTAL_SECTORS=$(( SIZE_MB * 1024 * 1024 / 512 ))
-    local PART_SECTORS=$(( TOTAL_SECTORS - PART_START ))
-
     download_firmware
 
-    echo "[RPI] Criando $SDCARD_IMG (${SIZE_MB}MB)..."
+    local SIZE_MB=128
+    echo "[SD] Criando $SDCARD_IMG (${SIZE_MB}MB, FAT32)..."
     dd if=/dev/zero of="$SDCARD_IMG" bs=1M count="$SIZE_MB" status=none
+    mformat -i "$SDCARD_IMG" -F -v "RASPI" ::
 
-    # Tabela MBR: partição FAT32 LBA bootável
-    sfdisk --quiet "$SDCARD_IMG" << EOF
-label: dos
-unit: sectors
-
-1 : start=${PART_START}, size=${PART_SECTORS}, type=c, bootable
-EOF
-
-    # Formata FAT32 na partição
-    mformat -i "${SDCARD_IMG}@@${PART_OFFSET}" -F -T "$PART_SECTORS" -v "RASPI" ::
-
-    # Firmware RPi
+    # Firmware RPi (também ignorado pelo QEMU, mas não faz mal)
     for f in $FIRMWARE_FILES; do
         if [ -f "$FIRMWARE_DIR/$f" ]; then
-            echo "[RPI] + $f"
-            mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" "$FIRMWARE_DIR/$f" ::
+            echo "[SD] + $f"
+            mcopy -i "$SDCARD_IMG" "$FIRMWARE_DIR/$f" ::
         fi
     done
 
     # Kernel
-    echo "[RPI] + kernel8.img ($(du -h "$KERNEL" | cut -f1))"
-    mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" "$KERNEL" "::kernel8.img"
+    echo "[SD] + kernel8.img ($(du -h "$KERNEL" | cut -f1))"
+    mcopy -i "$SDCARD_IMG" "$KERNEL" "::kernel8.img"
 
-    # config.txt — boot AArch64 sem modificações do firmware
+    # config.txt
     cat > /tmp/rpi_config.txt << 'EOF'
 arm_64bit=1
 kernel=kernel8.img
 enable_uart=1
 init_uart_clock=48000000
-# disable_overscan=1
 EOF
-    mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" /tmp/rpi_config.txt "::config.txt"
+    mcopy -i "$SDCARD_IMG" /tmp/rpi_config.txt "::config.txt"
 
-    # cmdline.txt — bootargs injetados pelo firmware do Pi no DTB /chosen/bootargs
+    # cmdline.txt
     local CMDLINE="demo=flame"
     if [ -f "$DISKS_DIR/disk0.adf" ]; then
         CMDLINE="demo=omega df0=disk0.adf df1=disk1.adf"
-        # Adiciona ROM se encontrada no diretório de discos
         for ROM_FILE in "$DISKS_DIR"/*.rom "$DISKS_DIR"/*.ROM; do
             [ -f "$ROM_FILE" ] || continue
             ROM_NAME="$(basename "$ROM_FILE")"
             CMDLINE="$CMDLINE rom=$ROM_NAME"
-            echo "[RPI] ROM: $ROM_NAME"
-            mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" "$ROM_FILE" "::$ROM_NAME"
-            break  # apenas o primeiro ROM encontrado
+            echo "[SD] ROM: $ROM_NAME"
+            mcopy -i "$SDCARD_IMG" "$ROM_FILE" "::$ROM_NAME"
+            break
         done
     fi
     printf '%s' "$CMDLINE" > /tmp/rpi_cmdline.txt
-    mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" /tmp/rpi_cmdline.txt "::cmdline.txt"
-    echo "[RPI] cmdline: $CMDLINE"
+    mcopy -i "$SDCARD_IMG" /tmp/rpi_cmdline.txt "::cmdline.txt"
+    echo "[SD] cmdline: $CMDLINE"
 
-    # ADFs (se existirem)
+    # ADFs
+    local ADDED=0
     for n in 0 1; do
         local ADF="$DISKS_DIR/disk${n}.adf"
         if [ -f "$ADF" ]; then
-            echo "[RPI] + disk${n}.adf ($(du -h "$ADF" | cut -f1))"
-            mcopy -i "${SDCARD_IMG}@@${PART_OFFSET}" "$ADF" "::disk${n}.adf"
+            echo "[SD] + disk${n}.adf ($(du -h "$ADF" | cut -f1))"
+            mcopy -i "$SDCARD_IMG" "$ADF" "::disk${n}.adf"
+            ADDED=$((ADDED + 1))
         fi
     done
 
     echo ""
-    echo "[RPI] sdcard.img pronto!"
+    echo "[SD] sdcard.img pronto! ($ADDED disco(s))"
+    echo "     QEMU:     ./run.sh  (usa sdcard.img automaticamente)"
+    echo "     Hardware: sudo dd if=sdcard.img of=/dev/sdX bs=4M status=progress && sync"
     echo ""
-    echo "      Grave com:"
-    echo "        sudo dd if=sdcard.img of=/dev/sdX bs=4M status=progress && sync"
-    echo "      ou use Balena Etcher (https://etcher.balena.io)"
-    echo ""
-    echo "      Para mudar o demo padrão edite firmware/cmdline.txt"
-    echo "      e rode ./run.sh -r novamente."
 }
 
 if [ "$CREATE_SD" -eq 1 ]; then
-    create_sd_image
+    create_sdcard_image
 fi
 
 # ---------------------------------------------------------------------------
@@ -221,16 +161,12 @@ fi
 # ---------------------------------------------------------------------------
 
 command -v cargo  >/dev/null 2>&1 || { echo "[ERROR] cargo não encontrado"; exit 1; }
-
-# Para -r não é necessário o launcher Go nem fdtput
-if [ "$CREATE_RPI" -eq 0 ]; then
-    command -v go >/dev/null 2>&1 || { echo "[ERROR] go não encontrado"; exit 1; }
-    command -v fdtput >/dev/null 2>&1 || {
-        echo "[ERROR] fdtput não encontrado"
-        echo "[HINT]  sudo apt install device-tree-compiler"
-        exit 1
-    }
-fi
+command -v go >/dev/null 2>&1 || { echo "[ERROR] go não encontrado"; exit 1; }
+command -v fdtput >/dev/null 2>&1 || {
+    echo "[ERROR] fdtput não encontrado"
+    echo "[HINT]  sudo apt install device-tree-compiler"
+    exit 1
+}
 
 cargo objcopy --version >/dev/null 2>&1 || {
     echo "[ERROR] cargo objcopy não disponível"
@@ -250,9 +186,8 @@ fi
 # DTB base (só necessário para QEMU)
 # ---------------------------------------------------------------------------
 
-if [ "$CREATE_RPI" -eq 0 ]; then
-    mkdir -p "$DTB_DIR"
-    if [ ! -f "$DTB" ]; then
+mkdir -p "$DTB_DIR"
+if [ ! -f "$DTB" ]; then
         echo "[DTB] Baixando para $DTB..."
         if command -v curl >/dev/null 2>&1; then
             curl -L -o "$DTB" "$DTB_URL"
@@ -263,7 +198,6 @@ if [ "$CREATE_RPI" -eq 0 ]; then
             exit 1
         fi
         echo "[DTB] OK — $DTB pronto"
-    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -303,15 +237,6 @@ fi
 echo "[BUILD] OK — $KERNEL pronto"
 
 # ---------------------------------------------------------------------------
-# Imagem RPi físico (sai após criar, sem launcher)
-# ---------------------------------------------------------------------------
-
-if [ "$CREATE_RPI" -eq 1 ]; then
-    create_rpi_image
-    exit 0
-fi
-
-# ---------------------------------------------------------------------------
 # Launcher TUI (QEMU)
 # ---------------------------------------------------------------------------
 
@@ -334,6 +259,6 @@ echo "[LAUNCH] Iniciando seletor de demos..."
     KERNEL_PATH="$(cd .. && pwd)/$KERNEL" \
     DTB_PATH="$(cd .. && pwd)/$DTB" \
     DTB_DIR="$(cd .. && pwd)/$DTB_DIR" \
-    SD_IMG_PATH="$SD_IMG" \
+    SD_IMG_PATH="$SDCARD_IMG" \
     go run .
 )
