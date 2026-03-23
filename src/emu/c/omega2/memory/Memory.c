@@ -32,6 +32,12 @@
 
 uint8_t* RAM24bit;
 
+// Chipset and CIA state live here — outside the Amiga address space so that
+// 0xA80000-0xBEFFFF is free RAM for AROS.  Placed at fixed physical addresses
+// above the 36 MB mark (ADF/ROM buffers use 32-35 MB).
+#define CHIPSTATE_PHYS_ADDR 0x2400000UL   // 36 MB
+#define CIASTATE_PHYS_ADDR  0x2410000UL   // 36 MB + 64 KB
+
 int diss = 0;
 
 
@@ -386,12 +392,17 @@ unsigned int RAM24BitDespatch(uint32_t address, enum DataSize size,enum DataDire
         case 4://Unused
             return 0;
             break;
-        case 5://Reserved - used by Emulator (0xA00000-0xBFFFFF)
-            // NOTE: Chipstate is embedded in Omega_t at Amiga 0xA80000 — do NOT
-            // expose this range as writable RAM. CIA is at the top (0xBF0000+).
+        case 5://Custom RAM (0xA00000-0xBEFFFF) + CIA (0xBF0000-0xBFFFFF)
+            if (address < 0xBF0000) {
+                switch(direction){
+                    case m68kWrite: BigEndianWrite(address, size, value); return 0;
+                    case m68kRead:  return BigEndianRead(address, size);
+                }
+            }
+            // CIA at top of space (0xBF0000-0xBFFFFF)
             switch(direction){
                 case m68kWrite: WriteCIA(address, value); return 0;
-                case m68kRead: return RAM24bit[address];
+                case m68kRead:  return RAM24bit[address];
             }
             return 0;
             break;
@@ -864,14 +875,26 @@ Omega_t* InitRAM(int RAM32bitSize){
 
     RAM24bit = (uint8_t*)OMEGA_PHYS_ADDR;
 
-    // Zero-initialise the entire Omega state
+    // Zero-initialise the Amiga address space
     for(size_t i = 0; i < sizeof(Omega_t); ++i) RAM24bit[i] = 0;
 
-    InitChipset(((Omega_t*)RAM24bit)->chipRAM, ((Omega_t*)RAM24bit)->Chipstate);
-    InitCIA(((Omega_t*)RAM24bit)->Chipstate, ((Omega_t*)RAM24bit)->CIAState);
+    // Chipset and CIA state at fixed physical addresses outside the Amiga space
+    uint8_t* chipstate_buf = (uint8_t*)CHIPSTATE_PHYS_ADDR;
+    uint8_t* ciastate_buf  = (uint8_t*)CIASTATE_PHYS_ADDR;
+    for(size_t i = 0; i < 65536; ++i) chipstate_buf[i] = 0;
+    for(size_t i = 0; i < 4096;  ++i) ciastate_buf[i]  = 0;
+
+    InitChipset(((Omega_t*)RAM24bit)->chipRAM, chipstate_buf);
+    InitCIA(chipstate_buf, ciastate_buf);
 
     //Clear the AutoConfig space and Extended ROM region
     for(int i=0xE00000;i<0xF80000;++i){
+        RAM24bit[i] = 0x00;
+    }
+
+    // Zero AROS custom RAM banks (0xA80000+512KB, 0xB00000+512KB)
+    // AROS exec probes these at boot and AddMemList()s them if they respond.
+    for(int i=0xA80000;i<0xB80000;++i){
         RAM24bit[i] = 0x00;
     }
 

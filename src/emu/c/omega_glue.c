@@ -16,6 +16,10 @@
 
 static Omega_t* g_omega = NULL;
 
+// ChipsetState is the global pointer set by InitChipset() in Chipset.c.
+// After the Omega_t restructure it is no longer accessible via g_omega->Chipstate.
+extern Chipset_t* ChipsetState;
+
 // Ajuste de posição do display Amiga no framebuffer.
 // O beam começa 20 linhas acima e 180 pixels à esquerda da área visível.
 #define FB_LINE_OFFSET  20
@@ -36,8 +40,7 @@ void omega_init(void) {
 
     g_omega = InitRAM(0);
 
-    Chipset_t* cs = (Chipset_t*)g_omega->Chipstate;
-    apply_fb_offset(cs);
+    apply_fb_offset(ChipsetState);
 
     FloppyInit();
 
@@ -53,12 +56,12 @@ static uint32_t g_frame_count = 0;
 void omega_run_frame(void) {
     if (!g_omega) return;
 
-    Chipset_t* cs = (Chipset_t*)g_omega->Chipstate;
+    Chipset_t* cs = ChipsetState;
 
     uint32_t iters = 0;
     while (cs->VBL == 0) {
         m68k_execute(128);
-        DMAExecute(g_omega->Chipstate, NULL);
+        DMAExecute(ChipsetState, NULL);
 
         if (++iters > 5000000) {
             probe_emit(EVT_WATCHDOG, iters, m68k_get_reg(NULL, M68K_REG_PC));
