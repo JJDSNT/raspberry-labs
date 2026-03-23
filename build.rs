@@ -52,6 +52,7 @@ fn main() {
         .file("src/emu/c/omega2/shared/os_debug.c")
         .file("src/emu/c/omega2/shared/EventQueue.c")
         .file("src/emu/c/omega2/agnus/Scheduler.c")
+        .file("src/emu/c/omega2/agnus/Beam.c")
         // Chipset hub
         .file("src/emu/c/omega2/Chipset.c")
         // memory
