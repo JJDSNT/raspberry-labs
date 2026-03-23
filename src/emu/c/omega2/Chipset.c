@@ -595,64 +595,23 @@ void INTREQ(uint16_t value){
      }
      
     uint16_t intMask = (ChipsetState->INTREQR & ChipsetState->INTENAR); //only set the int level, if bits are enabled
-    
+
     if(intMask !=0){
-        
-        if(intMask & 8192){  // External int
-            m68k_set_irq(6);
-        }
-        
-        if(intMask & 4096){ // Disk sync
-            m68k_set_irq(5);
-        }
-        
-        if(intMask & 2048){ // Serial receive buffer full
-            m68k_set_irq(5);
-        }
-        
-        if(intMask & 1024){ // Audio 3
-            m68k_set_irq(4);
-        }
-        
-        if(intMask & 512){  // Audio 2
-            m68k_set_irq(4);
-        }
-        
-        if(intMask & 256){  // Audio 1
-            m68k_set_irq(4);
-        }
-        
-        if(intMask & 128){  // Audio 0
-            m68k_set_irq(4);
-        }
-        
-        if(intMask & 64){   // Blitter finished
-            m68k_set_irq(3);
-        }
-        
-        if(intMask & 32){   // VBL
-            m68k_set_irq(3);
-        }
-        
-        if(intMask & 16){   // Copper
-            m68k_set_irq(3);
-        }
-        
-        if(intMask & 8){    // Ports, IO and timers
-            m68k_set_irq(2);
-        }
-        
-        if(intMask & 4){    // Software int
-            m68k_set_irq(1);
-        }
-        
-        if(intMask & 2){    // Disk block finished
-            m68k_set_irq(1);
-        }
-        
-        if(intMask & 1){    // Serial Transmit buffer empty
-            m68k_set_irq(1);
-        }
+        // Prioridade alta → baixa, usando else-if para não sobrescrever com nível menor
+        if     (intMask & 8192){ m68k_set_irq(6); } // External (CIA-B)
+        else if(intMask & 4096){ m68k_set_irq(5); } // Disk sync
+        else if(intMask & 2048){ m68k_set_irq(5); } // Serial RX
+        else if(intMask & 1024){ m68k_set_irq(4); } // Audio 3
+        else if(intMask &  512){ m68k_set_irq(4); } // Audio 2
+        else if(intMask &  256){ m68k_set_irq(4); } // Audio 1
+        else if(intMask &  128){ m68k_set_irq(4); } // Audio 0
+        else if(intMask &   64){ m68k_set_irq(3); } // Blitter finished
+        else if(intMask &   32){ m68k_set_irq(3); } // VBL
+        else if(intMask &   16){ m68k_set_irq(3); } // Copper
+        else if(intMask &    8){ m68k_set_irq(2); } // Ports/CIA-A
+        else if(intMask &    4){ m68k_set_irq(1); } // Software
+        else if(intMask &    2){ m68k_set_irq(1); } // Disk block
+        else if(intMask &    1){ m68k_set_irq(1); } // Serial TX
         
         //m68k_execute(1); //Definitely don't think I need this
     }else{

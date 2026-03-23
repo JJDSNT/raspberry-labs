@@ -772,14 +772,17 @@ unsigned int RAM24BitDespatchEXP(uint32_t address, enum DataSize size,enum DataD
 unsigned int cpu_read_byte(unsigned int address){
 
     //Two special cases for the CIA ICRs which need to be cleared on read
+    // HRM: bit 7 set if any pending bit is also enabled (IMR); read clears all bits.
     if(address == 0xBFED01){
         uint8_t p = RAM24bit[address];
+        if(p & CIAState->AICRMask) p |= 0x80;
         WRITEBYTE(address, 0);
         return p;
     }
 
     if(address == 0xBFDD00){
         uint8_t p = RAM24bit[address];
+        if(p & CIAState->BICRMask) p |= 0x80;
         RAM24bit[address] = 0;
         return p;
     }
