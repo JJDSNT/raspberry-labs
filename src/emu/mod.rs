@@ -10,6 +10,12 @@ extern "C" {
     fn omega_init();
     fn omega_run_frame();
     fn FloppyInsert(number: i32, adf: *mut u8);
+    fn omega_probe_dump(last_n: u32);
+}
+
+/// Dump the last `n` probe events to serial (callable from Rust).
+pub fn probe_dump(n: u32) {
+    unsafe { omega_probe_dump(n) };
 }
 
 // Buffers físicos fixos para os ADFs (880 KB cada, fora do kernel)

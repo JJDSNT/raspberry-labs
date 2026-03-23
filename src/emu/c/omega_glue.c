@@ -4,20 +4,19 @@
 
 #include <stdint.h>
 #include "omega_host.h"
-#include "omega2/m68k.h"
+#include "omega2/shared/omega_probe.h"
+#include "omega2/cpu/m68k.h"
 #include "omega2/Chipset.h"
-#include "omega2/CIA.h"
-#include "omega2/DMA.h"
-#include "omega2/Floppy.h"
-#include "omega2/Memory.h"
-#include "omega2/Omega.h"
+#include "omega2/cia/CIA.h"
+#include "omega2/agnus/DMA.h"
+#include "omega2/paula/Floppy.h"
+#include "omega2/memory/Memory.h"
+#include "omega2/shared/Omega.h"
 
 static Omega_t* g_omega = NULL;
 
 // Ajuste de posição do display Amiga no framebuffer.
 // O beam começa 20 linhas acima e 180 pixels à esquerda da área visível.
-// Subtrair do ponteiro inicial faz o índice 0 da DMA cair fora da tela
-// enquanto a área visível começa no offset correto.
 #define FB_LINE_OFFSET  20
 #define FB_PIXEL_OFFSET 180
 #define FB_WIDTH        800
@@ -31,6 +30,8 @@ static void apply_fb_offset(Chipset_t* cs) {
 
 void omega_init(void) {
     omega_host_log("Omega: init start");
+
+    probe_init();
 
     g_omega = InitRAM(0);
 
@@ -46,19 +47,33 @@ void omega_init(void) {
     omega_host_log("Omega: init done");
 }
 
+static uint32_t g_frame_count = 0;
+
 void omega_run_frame(void) {
     if (!g_omega) return;
 
     Chipset_t* cs = (Chipset_t*)g_omega->Chipstate;
 
-    // Loop apertado — replica o main.c original.
-    // Executa 128 ciclos M68k + um passo DMA até que a chipset sinalize VBL.
+    uint32_t iters = 0;
     while (cs->VBL == 0) {
         m68k_execute(128);
         DMAExecute(g_omega->Chipstate, NULL);
+
+        if (++iters > 5000000) {
+            probe_emit(EVT_WATCHDOG, iters, m68k_get_reg(NULL, M68K_REG_PC));
+            probe_dump_serial(512);
+            break;
+        }
     }
 
-    // Drena eventos de teclado acumulados pelo USB HID
+    g_frame_count++;
+
+    // One-shot probe dump after frame 22 — capture after Copper list is configured
+    if (g_frame_count == 22) {
+        probe_dump_serial(512);
+    }
+
+    // Drain keyboard events
     uint8_t scancode;
     int pressed;
     while (omega_host_poll_key(&scancode, &pressed)) {
@@ -66,10 +81,15 @@ void omega_run_frame(void) {
         else         releaseKey(scancode);
     }
 
-    // Frame completo — reseta VBL e atualiza ponteiro do framebuffer
+    // Frame complete — reset VBL and update framebuffer pointer
     cs->VBL = 0;
     cs->needsRedraw = 0;
     apply_fb_offset(cs);
 
     omega_host_vsync();
+}
+
+// Called from Rust to trigger a probe dump on demand (e.g. via serial command).
+void omega_probe_dump(uint32_t last_n) {
+    probe_dump_serial(last_n);
 }

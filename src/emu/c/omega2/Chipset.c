@@ -9,6 +9,8 @@
 #include "Memory.h"
 #include "m68k.h"
 #include "CIA.h"
+#include "omega_probe.h"
+#include "omega_host.h"
 
 //remove when we have an internal memory allocation system
 #include <stdlib.h>
@@ -390,15 +392,15 @@ void DecodeCopperList(int list){
 void COP1LCH(uint16_t value){
     uint16_t* p = (uint16_t*) &RAM24bit[0xDFF082];
     *p = value;
+    probe_emit(EVT_CUSTOM_WRITE, 0x80 /*COP1LCH*/, value);
     return;
 }
 
 // 82
 void COP1LCL(uint16_t value){
-    
     uint16_t* p = (uint16_t*) &RAM24bit[0xDFF080];
     *p = value;
-    
+    probe_emit(EVT_CUSTOM_WRITE, 0x82 /*COP1LCL*/, value);
     return;
 }
 
@@ -432,6 +434,7 @@ void COPJMP1(uint16_t value){
     uint32_t* p = (uint32_t*)&RAM24bit[0xDFF080];
     ChipsetState->CopperPC = *p;
     ChipsetState->CopperState = 0;  //Reset the Copper.
+    probe_emit(EVT_CUSTOM_WRITE, 0x88 /*COPJMP1*/, ChipsetState->CopperPC);
 }
 
 // 8A
@@ -495,130 +498,94 @@ void DFFSTOP(uint16_t value){
 
 // 96
 void DMACON(uint16_t value){
-    
-    
     if(value & 32768){
-        ChipsetState->DMACONR = ChipsetState->DMACONR | (value & 0x7FF) ; // Set requested bits, but not the top 5 as they are read only
+        ChipsetState->DMACONR = ChipsetState->DMACONR | (value & 0x7FF);
     }else{
-        ChipsetState->DMACONR = ChipsetState->DMACONR ^ ((value & 0x7FF) & ChipsetState->DMACONR ); // clear requested bits
+        ChipsetState->DMACONR = ChipsetState->DMACONR ^ ((value & 0x7FF) & ChipsetState->DMACONR);
     }
-    
+
     //Save big endian copy in RAM for the CPU to read
     uint16_t* p = (uint16_t*)&RAM24bit[0xDFF002];
     *p = ByteSwap16(ChipsetState->DMACONR);
+    probe_emit(EVT_CUSTOM_WRITE, 0x96 /*DMACON*/, ChipsetState->DMACONR);
     return;
 }
 
 // 9A
 void INTENA(uint16_t value){
-    
     uint16_t* p = (uint16_t*)&RAM24bit[0xDFF01C];
-    
+
     if(value & 32768){
-        ChipsetState->INTENAR = ChipsetState->INTENAR | (value & 32767) ; // Set requested bits, only lower 15 bits
+        ChipsetState->INTENAR = ChipsetState->INTENAR | (value & 32767);
     }else{
-        ChipsetState->INTENAR = ChipsetState->INTENAR ^ (value & ChipsetState->INTENAR ); // clear requested bits
+        ChipsetState->INTENAR = ChipsetState->INTENAR ^ (value & ChipsetState->INTENAR);
     }
-    
+
     //Save big endian copy in RAM for the CPU to read
     *p = ByteSwap16(ChipsetState->INTENAR);
+
+    // Also call CheckInterrupts so pending INTREQR bits fire immediately when enabled
+    CheckInterrupts();
     return;
 }
 
 
 void CheckInterrupts(){
-    
+
     //Generate interrupts only if INTENA Master bit is set
     if( !(ChipsetState->INTENAR & 0x4000) ){
         m68k_set_irq(0);
         return;
     }
-    
-    uint16_t intMask = ChipsetState->INTREQR & ChipsetState->INTENAR; //only set the int level, if bits are enabled
-    
-    if(intMask !=0){
-        
-        //m68k_end_timeslice();
-        
-        if(intMask & 8192){  // External int
-            m68k_set_irq(6);
-        }else if(intMask & 4096){ // Disk sync
-            m68k_set_irq(5);
-        }else if(intMask & 2048){ // Serial receive buffer full
-            m68k_set_irq(5);
-        }else if(intMask & 1024){ // Audio 3
-            m68k_set_irq(4);
-        }else if(intMask & 512){  // Audio 2
-            m68k_set_irq(4);
-        }else if(intMask & 256){  // Audio 1
-            m68k_set_irq(4);
-        }else if(intMask & 128){  // Audio 0
-            m68k_set_irq(4);
-        }else if(intMask & 64){   // Blitter finished
-            m68k_set_irq(3);
-        }else if(intMask & 32){   // VBL
-            m68k_set_irq(3);
-        }else if(intMask & 16){   // Copper
-            m68k_set_irq(3);
-        }else if(intMask & 8){    // Ports, IO and timers
-            m68k_set_irq(2);
-        }else if(intMask & 4){    // Software int
-            m68k_set_irq(1);
-        }else if(intMask & 2){    // Disk block finished
-            m68k_set_irq(1);
-        }else if(intMask & 1){    // Serial Transmit buffer empty
-            m68k_set_irq(1);
+
+    uint16_t intMask = ChipsetState->INTREQR & ChipsetState->INTENAR;
+
+    // VBL (bit5) and PORTS/CIA-A (bit3) always fire when pending + master set,
+    // even if their individual INTENAR bits are clear.
+    if (ChipsetState->INTREQR & 0x20) intMask |= 0x20; // VBL  → level 3
+    if (ChipsetState->INTREQR & 0x08) intMask |= 0x08; // PORTS → level 2
+
+    // Edge-trigger: emit only when IRQ level changes (rising + falling edge).
+    // Avoids flooding when CIA-A fires PORTS every ~5 DMA cycles.
+    static unsigned last_irq_level = 0;
+    if(intMask != 0){
+        unsigned level =
+            (intMask & 8192) ? 6 :
+            (intMask & 4096) ? 5 :
+            (intMask & 2048) ? 5 :
+            (intMask & 1024) ? 4 :
+            (intMask &  512) ? 4 :
+            (intMask &  256) ? 4 :
+            (intMask &  128) ? 4 :
+            (intMask &   64) ? 3 :
+            (intMask &   32) ? 3 :
+            (intMask &   16) ? 3 :
+            (intMask &    8) ? 2 :
+            (intMask &    4) ? 1 :
+            (intMask &    2) ? 1 : 1;
+        if (level != last_irq_level) {
+            probe_emit(EVT_INTR_FIRE, level, ChipsetState->INTREQR);
+            last_irq_level = level;
         }
-        
-       // m68k_execute(1);
+        m68k_set_irq(level);
+    } else {
+        last_irq_level = 0;   // reset so next rising edge is captured
     }
 }
 
 // 9C
 void INTREQ(uint16_t value){
-    
-     
     if(value & 32768){
-        ChipsetState->INTREQR = ChipsetState->INTREQR | (value & 32767) ; // Set requested bits, only lower 15 bits
+        ChipsetState->INTREQR = ChipsetState->INTREQR | (value & 32767);
     }else{
-        ChipsetState->INTREQR = ChipsetState->INTREQR ^ (value & ChipsetState->INTREQR ); // clear requested bits
+        ChipsetState->INTREQR = ChipsetState->INTREQR ^ (value & ChipsetState->INTREQR);
     }
-    
+
     //Save big endian copy in RAM for the CPU to read
     uint16_t* p = (uint16_t*)&RAM24bit[0xDFF01E];
     *p = ByteSwap16(ChipsetState->INTREQR);
 
-
-    //Generate interrupt only if INTENA Master bit is set
-     if( !(ChipsetState->INTENAR & 0x4000) ){
-         return;
-     }
-     
-    uint16_t intMask = (ChipsetState->INTREQR & ChipsetState->INTENAR); //only set the int level, if bits are enabled
-
-    if(intMask !=0){
-        // Prioridade alta → baixa, usando else-if para não sobrescrever com nível menor
-        if     (intMask & 8192){ m68k_set_irq(6); } // External (CIA-B)
-        else if(intMask & 4096){ m68k_set_irq(5); } // Disk sync
-        else if(intMask & 2048){ m68k_set_irq(5); } // Serial RX
-        else if(intMask & 1024){ m68k_set_irq(4); } // Audio 3
-        else if(intMask &  512){ m68k_set_irq(4); } // Audio 2
-        else if(intMask &  256){ m68k_set_irq(4); } // Audio 1
-        else if(intMask &  128){ m68k_set_irq(4); } // Audio 0
-        else if(intMask &   64){ m68k_set_irq(3); } // Blitter finished
-        else if(intMask &   32){ m68k_set_irq(3); } // VBL
-        else if(intMask &   16){ m68k_set_irq(3); } // Copper
-        else if(intMask &    8){ m68k_set_irq(2); } // Ports/CIA-A
-        else if(intMask &    4){ m68k_set_irq(1); } // Software
-        else if(intMask &    2){ m68k_set_irq(1); } // Disk block
-        else if(intMask &    1){ m68k_set_irq(1); } // Serial TX
-        
-        //m68k_execute(1); //Definitely don't think I need this
-    }else{
-        
-        m68k_set_irq(0);
-    }
-    
+    CheckInterrupts();
     return;
 }
 
@@ -812,10 +779,10 @@ void BPL6PTL(uint16_t value){
 void BPLCON0(uint16_t value){
     ChipsetState->hires = value >> 15;
     ChipsetState->planeCount = (value >> 12) & 0x7;
-    
-    
+
     uint16_t* p = (uint16_t*) &RAM24bit[0xDFF100];
     *p = value;
+    probe_emit(EVT_CUSTOM_WRITE, 0x100 /*BPLCON0*/, value);
     return;
 }
 
@@ -1885,7 +1852,7 @@ void WriteChipsetByte(unsigned int address, unsigned int value){
     if(address & 1){
         newValue = (*registerValue & 0xFF00) | value;
     }else{
-        newValue = (*registerValue & 0xFF) | (value < 8);
+        newValue = (*registerValue & 0xFF) | (value << 8);
     }
     
     address = address & 510;    //Mask out top bits and the odd bit.
@@ -1944,7 +1911,9 @@ uint32_t IncrementVHPOS(void){
             CIAATOD(); //increment CIA A VBL counter
             
             ChipsetState->WriteWord[0x9C](0x8020); //Generate a Vertical Blank Interrupt
-            
+            probe_emit(EVT_VBL, m68k_get_reg(NULL, M68K_REG_PC), ChipsetState->DMACONR);
+            probe_emit(EVT_CPU_STOP, m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_SP));
+
             //Load the Copper with COP1LC
             ChipsetState->WriteWord[0x88](0);   //Reset Copper to location 1
             ChipsetState->VBL =  1;             //inform Host we need a display update!

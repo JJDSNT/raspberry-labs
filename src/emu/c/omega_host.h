@@ -28,4 +28,17 @@ int omega_host_poll_key(uint8_t* scancode, int* pressed);
 const uint8_t* omega_host_rom_ptr(void);
 size_t         omega_host_rom_size(void);
 
+// Convenience: log "prefix: 0xXXXXXXXX" without needing sprintf.
+static inline void omega_log_hex(const char* prefix, uint32_t val) {
+    static const char HEX[] = "0123456789ABCDEF";
+    char buf[48];
+    int i = 0;
+    while (prefix[i] && i < 36) { buf[i] = prefix[i]; i++; }
+    buf[i++] = ':'; buf[i++] = ' ';
+    buf[i++] = '0'; buf[i++] = 'x';
+    for (int s = 28; s >= 0; s -= 4) buf[i++] = HEX[(val >> s) & 0xF];
+    buf[i] = '\0';
+    omega_host_log(buf);
+}
+
 #endif /* OMEGA_HOST_H_ */
