@@ -50,6 +50,7 @@ fn main() {
         // shared
         .file("src/emu/c/omega2/shared/omega_probe.c")
         .file("src/emu/c/omega2/shared/os_debug.c")
+        .file("src/emu/c/omega2/shared/emu_debug.c")
         .file("src/emu/c/omega2/shared/EventQueue.c")
         .file("src/emu/c/omega2/agnus/Scheduler.c")
         .file("src/emu/c/omega2/agnus/Beam.c")
