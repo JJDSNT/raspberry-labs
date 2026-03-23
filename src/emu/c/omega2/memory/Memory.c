@@ -25,6 +25,7 @@
 #include "CIA.h"
 #include "Floppy.h"
 
+#include "omega_probe.h"
 #include "omega_host.h"
 
 #define OMEGA_PHYS_ADDR 0x1000000UL
@@ -845,7 +846,8 @@ void cpu_set_fc(unsigned int fc){
 }
 
 int  cpu_irq_ack(int level){
-    return 0;
+    probe_emit(EVT_INTR_ACK, (uint32_t)level, M68K_INT_ACK_AUTOVECTOR);
+    return M68K_INT_ACK_AUTOVECTOR;
 }
 
 

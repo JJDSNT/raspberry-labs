@@ -8,6 +8,8 @@
 #include "CIA.h"
 #include "Memory.h"
 #include "Floppy.h"
+#include "omega_probe.h"
+#include "omega_host.h"
 
 //Remove when we have an internal Memory allocation system
 //#include <stdlib.h>
@@ -113,12 +115,12 @@ void RunCIACycle(){
         RAM24bit[CIA_BTBHI] = (CIAState->BTB >> 8);
     }
     
-    //Need to check interrupts, if any of the flags are set, then we need to raise an interrupt with Paula...and keep doing it until the offending ICR cleared
-    if(RAM24bit[CIA_AICR]){
+    // Fire INTREQ only when masked ICR flags are set (CIA /IRQ is asserted)
+    if(RAM24bit[CIA_AICR] & CIAState->AICRMask){
         ChipsetStateCIA->WriteWord[0x9C](32776); //Generate interrupt 3
     }
-    
-    if(RAM24bit[CIA_BICR]){
+
+    if(RAM24bit[CIA_BICR] & CIAState->BICRMask){
         ChipsetStateCIA->WriteWord[0x9C](40960); //Generate interrupt 13
     }
     
@@ -220,10 +222,10 @@ void SetDriveEmpty(void){
 
 
 void DiskIndexPulse(){
-
+    probe_emit(EVT_CIA_WRITE, 0xBFDD00 /*CIA-B index pulse*/, 0x10);
     if(CIAState->BICRMask & 0x10){
-            RAM24bit[CIA_BICR] = RAM24bit[CIA_BICR] | 0x10;
-            ChipsetStateCIA->WriteWord[0x9C](40960); //Generate interrupt 13
+        RAM24bit[CIA_BICR] = RAM24bit[CIA_BICR] | 0x10;
+        ChipsetStateCIA->WriteWord[0x9C](40960); //Generate interrupt 13
     }
 }
 
@@ -355,15 +357,12 @@ void ASetSDR(uint8_t value){
 }
 
 void ASetICR(uint8_t value){
-    
-    //RAM24bit[0xBFED01]
-    
     if(value & 128){
         CIAState->AICRMask = CIAState->AICRMask | (value & 127);
     }else{
-        CIAState->AICRMask = CIAState->AICRMask ^ (value & CIAState->AICRMask); // clear requested bits
+        CIAState->AICRMask = CIAState->AICRMask ^ (value & CIAState->AICRMask);
     }
-    
+    probe_emit(EVT_CIA_WRITE, 0xBFED01 /*CIA-A ICR*/, CIAState->AICRMask);
     return;
 }
 
@@ -408,6 +407,7 @@ void BSetPRA(uint8_t value){
 
 void BSetPRB(uint8_t value){
     RAM24bit[CIA_BPRB] = value;
+    probe_emit(EVT_CIA_WRITE, 0xBFD100 /*CIA-B PRB (floppy)*/, value);
     
     return;
 }
@@ -521,13 +521,12 @@ void BSetSDR(uint8_t value){
 }
 
 void BSetICR(uint8_t value){
-    
     if(value & 128){
         CIAState->BICRMask = CIAState->BICRMask | (value & 127);
     }else{
-        CIAState->BICRMask = CIAState->BICRMask ^ (value & CIAState->BICRMask); // clear requested bits
+        CIAState->BICRMask = CIAState->BICRMask ^ (value & CIAState->BICRMask);
     }
-
+    probe_emit(EVT_CIA_WRITE, 0xBFDD00 /*CIA-B ICR*/, CIAState->BICRMask);
     return;
 }
 
@@ -633,10 +632,8 @@ void InitCIA(void* chipstate, void* memory){
     BSetCRA(0);
     BSetCRB(0);
     
-    CIAState->AICRMask = 0xFF;
-    CIAState->BICRMask = 0xFF;
-    
-    ASetSDR(0);
+    CIAState->AICRMask = 0x00;  // real hardware reset: all interrupts masked off
+    CIAState->BICRMask = 0x00;  // real hardware reset: all interrupts masked off
     
 
     

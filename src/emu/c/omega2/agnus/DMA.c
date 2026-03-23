@@ -8,6 +8,7 @@
 #include "DMA.h"
 #include <stdint.h>
 
+#include "omega_probe.h"
 #include "Chipset.h"
 #include "Blitter.h"
 #include "CIA.h"
@@ -102,10 +103,15 @@ void DMAExecute(void* address, uint32_t* framebuffer){
 
     
     IncrementVHPOS(); //Increment the Display beam position
+    g_probe_cycle = ChipsetState->DMACycles;
+    g_probe_vpos  = (uint16_t)(ChipsetState->VHPOS >> 8);
     
-    uint16_t AUD0LEN = ChipsetState->chipram[0xDC00A4];
-    if(AUD0LEN == 0){
-        ChipsetState->WriteWord[0x9C](0x8080); //Generate an AUD0 interupt
+    // Audio 0 interrupt: only fire when both master DMA and AUD0EN are set
+    if((ChipsetState->DMACONR & 0x201) == 0x201){  // bit9=DMAEN + bit0=AUD0EN both set
+        uint16_t AUD0LEN = ChipsetState->chipram[0xDC00A4];
+        if(AUD0LEN == 0){
+            ChipsetState->WriteWord[0x9C](0x8080); //Generate an AUD0 interupt
+        }
     }
     
     //DMA disabled

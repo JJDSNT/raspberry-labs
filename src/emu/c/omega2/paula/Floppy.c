@@ -7,7 +7,8 @@
 
 #include "Memory.h"
 #include "CIA.h"
-
+#include "omega_probe.h"
+#include "omega_host.h"
 
 #include "Floppy.h"
 
@@ -114,13 +115,13 @@ void FloppyCycle(){
     
     //A new drive has been selected!
     if(number != activeDrive){
-        
+        probe_emit(EVT_FLOPPY_CMD, (uint32_t)number /*drive*/, RAM24bit[0xBFD100]);
+
         //Drive has been selected and the motor is off so Set the drive ready flag
         if((PRB & 0x80) == 0){
             drive[number].state = 1; //Set the Drive Ready flag
-            //printf("Drive %d Selected\n",number);
         }
-        
+
         activeDrive = number;
     }
     
@@ -453,12 +454,13 @@ int FloppyTrackReady = 0;
 void FloppyExecute(Chipset_t* ChipsetState){
     uint16_t* DSKLEN = (uint16_t*)&ChipsetState->chipram[0xDFF024];
 
-    
+
     if(*DSKLEN & 0x8000){
         uint32_t* address = (uint32_t*)&ChipsetState->chipram[0xDFF020];
 
-        
+
         if(FloppyTrackReady==0){
+            probe_emit(EVT_FLOPPY_CMD, *DSKLEN, *address);
             FloppyReadTrack(*address, *DSKLEN & 0x3FFF);
             FloppyTrackReady = 1;
             FloppyCountdown = (*DSKLEN);

@@ -43,26 +43,35 @@ fn main() {
         // HAL do Pi 3
         .file("src/usb/hal_dwc2.c")
 
-        // Omega2 emulator
+        // Omega2 emulator — glue
         .file("src/emu/c/omega_glue.c")
         .file("src/emu/c/omega_input.c")
         .file("src/emu/c/omega_stubs.c")
-        .file("src/emu/c/omega2/Memory.c")
+        // shared
+        .file("src/emu/c/omega2/shared/omega_probe.c")
+        .file("src/emu/c/omega2/shared/EventQueue.c")
+        // Chipset hub
         .file("src/emu/c/omega2/Chipset.c")
-        .file("src/emu/c/omega2/CIA.c")
-        .file("src/emu/c/omega2/DMA.c")
-        .file("src/emu/c/omega2/Floppy.c")
-        .file("src/emu/c/omega2/Blitter.c")
-        .file("src/emu/c/omega2/Copper.c")
-        .file("src/emu/c/omega2/Denise.c")
-        .file("src/emu/c/omega2/Bitplane.c")
-        .file("src/emu/c/omega2/EventQueue.c")
-        .file("src/emu/c/omega2/m68kcpu.c")
-        .file("src/emu/c/omega2/m68kops.c")
-        .file("src/emu/c/omega2/m68kopac.c")
-        .file("src/emu/c/omega2/m68kopdm.c")
-        .file("src/emu/c/omega2/m68kopnz.c")
-        .file("src/emu/c/omega2/m68kdasm.c")
+        // memory
+        .file("src/emu/c/omega2/memory/Memory.c")
+        // cia
+        .file("src/emu/c/omega2/cia/CIA.c")
+        // agnus
+        .file("src/emu/c/omega2/agnus/DMA.c")
+        .file("src/emu/c/omega2/agnus/Blitter.c")
+        .file("src/emu/c/omega2/agnus/Copper.c")
+        .file("src/emu/c/omega2/agnus/Bitplane.c")
+        // denise
+        .file("src/emu/c/omega2/denise/Denise.c")
+        // paula
+        .file("src/emu/c/omega2/paula/Floppy.c")
+        // cpu
+        .file("src/emu/c/omega2/cpu/m68kcpu.c")
+        .file("src/emu/c/omega2/cpu/m68kops.c")
+        .file("src/emu/c/omega2/cpu/m68kopac.c")
+        .file("src/emu/c/omega2/cpu/m68kopdm.c")
+        .file("src/emu/c/omega2/cpu/m68kopnz.c")
+        .file("src/emu/c/omega2/cpu/m68kdasm.c")
 
         // Includes
         .include(tinyusb)
@@ -70,6 +79,13 @@ fn main() {
         .include(format!("{}/portable/synopsys/dwc2", tinyusb))
         .include("src/emu/c")
         .include("src/emu/c/omega2")
+        .include("src/emu/c/omega2/shared")
+        .include("src/emu/c/omega2/agnus")
+        .include("src/emu/c/omega2/cia")
+        .include("src/emu/c/omega2/cpu")
+        .include("src/emu/c/omega2/denise")
+        .include("src/emu/c/omega2/memory")
+        .include("src/emu/c/omega2/paula")
 
         // Flags
         .flag("-ffreestanding")
@@ -94,8 +110,8 @@ fn main() {
     }
 
     // Ativa AROS + chipset ECS se os headers gerados pelo gen_rom.py existirem
-    let aros_main = std::path::Path::new("src/emu/c/omega2/aros_main.h");
-    let aros_ext  = std::path::Path::new("src/emu/c/omega2/aros_ext.h");
+    let aros_main = std::path::Path::new("src/emu/c/omega2/memory/aros_main.h");
+    let aros_ext  = std::path::Path::new("src/emu/c/omega2/memory/aros_ext.h");
     if aros_main.exists() && aros_ext.exists() {
         builder.define("USE_AROS",    None);
         builder.define("CHIPSET_ECS", None);

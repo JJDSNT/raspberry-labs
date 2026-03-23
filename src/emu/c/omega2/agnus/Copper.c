@@ -6,6 +6,8 @@
 //
 
 #include "Copper.h"
+#include "omega_probe.h"
+#include "omega_host.h"
 
 uint16_t swap(uint16_t* p){
     return (*p >> 8) | (*p << 8);
@@ -75,7 +77,7 @@ void ExecuteCopper(Chipset_t* ChipsetState){
                 if (beam_past) {
                     ChipsetState->CopperState = 0;
                 } else {
-                    // Guarda waitpos e mask para o estado de espera
+                    probe_emit(EVT_COPPER_WAIT, waitpos, mask);
                     ChipsetState->CopperIR1 = waitpos;
                     ChipsetState->CopperIR2 = mask;
                     ChipsetState->CopperState = 3;
@@ -106,7 +108,8 @@ void ExecuteCopper(Chipset_t* ChipsetState){
                     ChipsetState->CopperState = 4;
                     return;
                 }
-                ChipsetState->WriteWord[addr >> 1](ChipsetState->CopperIR2);
+                probe_emit(EVT_COPPER_MOVE, addr, ChipsetState->CopperIR2);
+                ChipsetState->WriteWord[addr](ChipsetState->CopperIR2);
             }
             ChipsetState->CopperState = 0;
             break;
