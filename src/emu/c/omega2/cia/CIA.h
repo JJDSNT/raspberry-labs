@@ -80,8 +80,8 @@ void SetTrack0(void);
 void ClearTrack0(void);
 void SetDriveReady(void);
 void ClearDriveReady(void);
-void SetDriveFull(void);
-void SetDriveEmpty(void);
+void SetDiskChange(void);    // /DSKCHNG = LOW  (bit2=0): change pending
+void ClearDiskChange(void); // /DSKCHNG = HIGH (bit2=1): disk stable / absent
 void DiskIndexPulse(void);
 
 void releaseKey(uint16_t keyCode);

@@ -209,15 +209,15 @@ void ClearDriveReady(void){
     RAM24bit[CIA_APRA] = RAM24bit[CIA_APRA] | 0x20;
 }
 
-void SetDriveFull(void){
-
-    RAM24bit[CIA_APRA] = RAM24bit[CIA_APRA] | 0x4;                // High when inserted
+// /DSKCHNG is active-LOW (CIA-A PRA bit 2).
+// LOW  (bit2=0) = change has occurred (disk inserted/ejected, not yet stepped)
+// HIGH (bit2=1) = no pending change (disk stable or absent and acknowledged)
+void SetDiskChange(void){
+    RAM24bit[CIA_APRA] = RAM24bit[CIA_APRA] & 0xFB;  // bit2 = 0: change pending
 }
 
-void SetDriveEmpty(void){
-
-    RAM24bit[CIA_APRA] =  RAM24bit[CIA_APRA] & 0xFB;              // Low when empty
-    
+void ClearDiskChange(void){
+    RAM24bit[CIA_APRA] = RAM24bit[CIA_APRA] | 0x4;   // bit2 = 1: stable
 }
 
 
