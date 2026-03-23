@@ -386,9 +386,16 @@ unsigned int RAM24BitDespatch(uint32_t address, enum DataSize size,enum DataDire
         case 4://Unused
             return 0;
             break;
-        case 5://Reserved - used by Emualtor
+        case 5://Custom RAM (0xA80000-0xB7FFFF for AROS) + CIA (0xBF0000-0xBFFFFF)
 
-            //CIA at top of space
+            if (address < 0xBF0000) {
+                // Custom RAM banks (FS-UAE maps 0xA80000+512K and 0xB00000+512K for AROS)
+                switch(direction){
+                    case m68kWrite: BigEndianWrite(address, size, value); return 0;
+                    case m68kRead: return BigEndianRead(address, size);
+                }
+            }
+            // CIA at top of space (0xBF0000-0xBFFFFF)
             switch(direction){
                 case m68kWrite: WriteCIA(address, value); return 0;
                 case m68kRead: return RAM24bit[address];
@@ -874,6 +881,14 @@ Omega_t* InitRAM(int RAM32bitSize){
     for(int i=0xE00000;i<0xF80000;++i){
         RAM24bit[i] = 0x00;
     }
+
+#if defined(HAVE_AROS)
+    // AROS custom RAM: 0xA80000 (512KB) + 0xB00000 (512KB), mirroring FS-UAE
+    // allocation for 68000 configs without fast RAM.
+    for(int i=0xA80000;i<0xB80000;++i){
+        RAM24bit[i] = 0x00;
+    }
+#endif
 
     //Fill chipram with junk for testing purpose
 #if defined(CHIPSET_ECS)
