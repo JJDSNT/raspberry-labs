@@ -1876,14 +1876,7 @@ uint32_t IncrementVHPOS(void){
 
     ChipsetState->VBL = 0;
     
-    //Check for external VH Sync...
-    uint16_t* BPLCON0 =(uint16_t*)&RAM24bit[0xDFF100];
-    if( (*BPLCON0 & 0x2) ){
-        ChipsetState->VBL =  0;
-        return 0;
-    }else{
-        ChipsetState->VHPOS += 1;
-    }
+    ChipsetState->VHPOS += 1;
 
     
     //Check Horizontal Position, if we are at cycle 0xE0 - 224, that is the maximum display position 800 host pixels
