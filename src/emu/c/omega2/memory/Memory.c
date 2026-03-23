@@ -363,99 +363,74 @@ unsigned int RAM24BitDespatch(uint32_t address, enum DataSize size,enum DataDire
 
     switch((address >> 21) & 0x7){
 
-        case 0://ChipRAM
-
-            //address = address & 0x7FFFF;
-
+        case 0: // Chip RAM — 0x000000-0x1FFFFF (2MB, ECS)
             switch(direction){
                 case m68kWrite: BigEndianWrite(address, size, value); return 0;
-                case m68kRead: return BigEndianRead(address, size);
+                case m68kRead:  return BigEndianRead(address, size);
             }
             break;
 
-        case 1://ZII Space
+        // -----------------------------------------------------------------------
+        // Cases 1-4: Zorro II expansion space (0x200000-0x9FFFFF).
+        // No expansion boards installed.  Memory scanner writes a test pattern
+        // and reads it back — returning 0 here tells exec the area is empty.
+        // Previously these fell through to BigEndianRead/Write, which made AROS
+        // think it had up to 6MB of spurious fast RAM in the flat RAM24bit buffer.
+        // -----------------------------------------------------------------------
+        case 1: // Zorro II slot 0 — 0x200000-0x3FFFFF — no board
+        case 2: // Zorro II slot 1 — 0x400000-0x5FFFFF — no board
+        case 3: // Zorro II slot 2 — 0x600000-0x7FFFFF — no board
+        case 4: // Zorro II slot 3 — 0x800000-0x9FFFFF — no board
+            return 0;
 
-            switch(direction){
-                case m68kWrite: BigEndianWrite(address, size, value); return 0;
-                case m68kRead: return BigEndianRead(address, size);
-            }
-            break;
-
-            return 0;
-            break;
-        case 2://ZII Space
-            return 0;
-            break;
-        case 3://ZII Space
-            return 0;
-            break;
-        case 4://Unused
-            return 0;
-            break;
-        case 5://Custom RAM (0xA00000-0xBEFFFF) + CIA (0xBF0000-0xBFFFFF)
-            if (address < 0xBF0000) {
-                switch(direction){
-                    case m68kWrite: BigEndianWrite(address, size, value); return 0;
-                    case m68kRead:  return BigEndianRead(address, size);
-                }
-            }
-            // CIA at top of space (0xBF0000-0xBFFFFF)
+        case 5: // 0xA00000-0xBFFFFF
+            // 0xA00000-0xBEFFFF: Slow/custom RAM area.
+            // No slow RAM installed — return 0 so exec doesn't claim it.
+            if (address < 0xBF0000) return 0;
+            // 0xBF0000-0xBFFFFF: CIA registers
             switch(direction){
                 case m68kWrite: WriteCIA(address, value); return 0;
                 case m68kRead:  return RAM24bit[address];
             }
             return 0;
-            break;
 
-        case 6:// ChipRegs
-
-
-            //Slowram
-            if(address < 0xD80000){ // 0xD80000)
-
-                //We don't want slow RAM so the code below decodes the addesses as though there is no slow ram
+        case 6: // 0xC00000-0xDFFFFF — chip registers + slow-RAM mirror
+            // 0xC00000-0xD7FFFF: slow-RAM mirror — re-map reads to chip regs;
+            // only forward DMACON writes (some code writes DMACON via slow-RAM alias).
+            if(address < 0xD80000){
                 switch(direction){
-
                     case m68kRead:
-                       // omega_host_log("SlowRAM Read");
-                        address =  0xDFF000 | (address & 511);
-                        uint16_t v1 =  BigEndianRead(address, size);
-                        return v1;
+                        address = 0xDFF000 | (address & 511);
+                        return BigEndianRead(address, size);
                     case m68kWrite:
-                        if((address & 0x1FF) == 0x9A){
-                         //   omega_host_log("SlowRAM Write");
-                            WriteChipsetWord(address, value);
-                        }
+                        if((address & 0x1FF) == 0x9A) WriteChipsetWord(address, value);
                         return 0;
                 }
-
             }
-
+            // 0xD80000-0xDFFFFF: chip registers
             switch(direction){
-
-                case m68kRead:
-                    return BigEndianRead(address, size);
-
+                case m68kRead: return BigEndianRead(address, size);
                 case m68kWrite:
-
                     switch(size){
-                        case m68kByte:
-                            WriteChipsetByte(address, value);
-                            return 0;
-                        case m68kWord:
-                            WriteChipsetWord(address, value);
-                            return 0;
-                        case m68kLong:
-                            WriteChipsetLong(address, value);
-                            return 0;
+                        case m68kByte:  WriteChipsetByte(address, value);  return 0;
+                        case m68kWord:  WriteChipsetWord(address, value);  return 0;
+                        case m68kLong:  WriteChipsetLong(address, value);  return 0;
                     }
             }
-
             return 0;
-            break;
-        case 7:// ROM
-            return BigEndianRead(address, size);
-            break;
+
+        case 7: // 0xE00000-0xFFFFFF
+            // 0xE00000-0xE7FFFF: reserved / Gayle mirror — not present, return 0
+            if (address < 0xE80000) return 0;
+
+            // 0xE80000-0xEFFFFF: Zorro AutoConfig ROM space.
+            // Return 0xFF per-byte (open bus / no board) so exec's autoconfig
+            // scan terminates cleanly without finding phantom expansion hardware.
+            if (address < 0xF00000) return (size == m68kByte) ? 0xFF : 0xFFFF;
+
+            // 0xF00000-0xFFFFFF: Kickstart ROM — read-only
+            if (direction == m68kRead) return BigEndianRead(address, size);
+            return 0;  // ROM writes: silently dropped (read-only)
     }
 
     return 0;
