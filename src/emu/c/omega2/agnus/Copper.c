@@ -6,11 +6,62 @@
 //
 
 #include "Copper.h"
+#include "Scheduler.h"
+#include "Beam.h"
 #include "omega_probe.h"
 #include "omega_host.h"
 
 uint16_t swap(uint16_t* p){
     return (*p >> 8) | (*p << 8);
+}
+
+// ---------------------------------------------------------------------------
+// copper_find_match — compute DMA cycles until the WAIT condition is met.
+//
+// Returns 0 if the condition is already satisfied (caller should not enter
+// state 3 in this case, but 0 is safe).  Returns the number of DMA cycles
+// from NOW until the first cycle where (beam & mask) >= (waitpos & mask).
+//
+// Handles the common case (vmask=0xFF, hmask=0xFE) exactly.  For unusual
+// masks, returns 1 so the comparator is re-evaluated next cycle (correct,
+// just not optimal).
+// ---------------------------------------------------------------------------
+static uint64_t copper_find_match(
+    uint8_t vwait, uint8_t hwait,
+    uint8_t vmask, uint8_t hmask,
+    uint8_t vcur,  uint8_t hcur)
+{
+    uint8_t vtgt = vwait & vmask;
+    uint8_t htgt = hwait & hmask;
+    uint8_t vm   = vcur  & vmask;
+    uint8_t hm   = hcur  & hmask;
+
+    // Already past?
+    if (vm > vtgt) return 0;
+    if (vm == vtgt && hm >= htgt) return 0;
+
+    // Unusual mask: give up on exact prediction, try again next cycle.
+    if (vmask != 0xFF || hmask != 0xFE) return 1;
+
+    // Same masked line: just advance within the line.
+    // hwait is in beam units where bit 0 is always clear (0xFE mask); each
+    // unit = 2 colour clocks = 1 DMA cycle.  htgt >> 1 = DMA cycle in line.
+    if (vm == vtgt) {
+        uint32_t hcur_dma = hcur >> 1;
+        uint32_t htgt_dma = htgt >> 1;
+        return (htgt_dma > hcur_dma) ? (uint64_t)(htgt_dma - hcur_dma) : 1;
+    }
+
+    // Different line: count remaining cycles in this line + full lines to
+    // vwait + cycles into the target line.
+    uint32_t lines_left  = (uint32_t)(vtgt - vm);           // lines still to go
+    uint32_t hcur_dma    = hcur >> 1;
+    uint32_t htgt_dma    = htgt >> 1;
+    uint32_t hcnt        = (uint32_t)beam_hcnt();           // DMA cycles per line
+    uint64_t delta       = (uint64_t)(hcnt - hcur_dma)      // rest of current line
+                         + (uint64_t)(lines_left - 1) * hcnt // full lines between
+                         + (uint64_t)htgt_dma;               // position in target line
+    return delta + 1; // +1: ensure we're at or past the target when we wake
 }
 
 void ExecuteCopper(Chipset_t* ChipsetState){
@@ -81,6 +132,11 @@ void ExecuteCopper(Chipset_t* ChipsetState){
                     ChipsetState->CopperIR1 = waitpos;
                     ChipsetState->CopperIR2 = mask;
                     ChipsetState->CopperState = 3;
+                    // findMatch: pre-compute the earliest DMA cycle when the
+                    // condition can be true so case 3 skips the spin entirely.
+                    uint64_t delta = copper_find_match(
+                        vwait, hwait, vmask, hmask, vcur, hcur);
+                    ChipsetState->copper_wake_cycle = sched_clock() + delta;
                 }
             }
             break;
@@ -118,7 +174,12 @@ void ExecuteCopper(Chipset_t* ChipsetState){
             
             
         case 3:
-            // Wait state — reavalia a condição a cada ciclo
+            // Wait state — skip evaluation until copper_wake_cycle is reached.
+            // findMatch() set wake_cycle when we entered this state; checking
+            // sched_clock() here costs one compare per DMA cycle instead of the
+            // full comparator, reducing work by ~10× for typical wait intervals.
+            if (sched_clock() < ChipsetState->copper_wake_cycle) break;
+
             {
                 uint16_t waitpos = ChipsetState->CopperIR1;
                 uint16_t mask    = ChipsetState->CopperIR2;
@@ -134,7 +195,14 @@ void ExecuteCopper(Chipset_t* ChipsetState){
                 else if ((vcur & vmask) == (vwait & vmask))
                     beam_past = ((hcur & hmask) >= (hwait & hmask));
 
-                if (beam_past) ChipsetState->CopperState = 0;
+                if (beam_past) {
+                    ChipsetState->CopperState = 0;
+                } else {
+                    // Woke too early (e.g. masked wait or off-by-one) — recompute.
+                    uint64_t delta = copper_find_match(
+                        vwait, hwait, vmask, hmask, vcur, hcur);
+                    ChipsetState->copper_wake_cycle = sched_clock() + (delta ? delta : 1);
+                }
             }
             break;
             

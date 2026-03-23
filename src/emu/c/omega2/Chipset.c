@@ -441,6 +441,7 @@ void COPJMP1(uint16_t value){
     uint32_t* p = (uint32_t*)&RAM24bit[0xDFF080];
     ChipsetState->CopperPC = *p;
     ChipsetState->CopperState = 0;  //Reset the Copper.
+    ChipsetState->copper_wake_cycle = 0;
     probe_emit(EVT_CUSTOM_WRITE, 0x88 /*COPJMP1*/, ChipsetState->CopperPC);
 }
 
@@ -450,6 +451,7 @@ void COPJMP2(uint16_t value){
     uint32_t* p = (uint32_t*)&RAM24bit[0xDFF084];
     ChipsetState->CopperPC = *p;
     ChipsetState->CopperState = 0;  //Reset the Copper.
+    ChipsetState->copper_wake_cycle = 0;
 }
 
 
@@ -1817,10 +1819,11 @@ void InitChipset(void* chipram, void* memory){
     COP1LCL(0x0);
     COP2LCH(0x0);
     COP2LCL(0x0);
-    ChipsetState->CopperPC  = 0x0;
-    ChipsetState->CopperIR1 = 0xFFFF;
-    ChipsetState->CopperIR2 = 0xFFFE;
-    ChipsetState->CopperState = 3;
+    ChipsetState->CopperPC         = 0x0;
+    ChipsetState->CopperIR1        = 0xFFFF;
+    ChipsetState->CopperIR2        = 0xFFFE;
+    ChipsetState->CopperState      = 3;
+    ChipsetState->copper_wake_cycle = 0;  // wake immediately on first eval
     
     RAM24bit[0xDFF100] = 0x0;
     RAM24bit[0xDFF101] = 0x0;
