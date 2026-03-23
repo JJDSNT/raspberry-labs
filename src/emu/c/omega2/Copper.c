@@ -46,39 +46,42 @@ void ExecuteCopper(Chipset_t* ChipsetState){
             //Load IR2
             ChipsetState->CopperIR2 = swap((uint16_t*)&ChipsetState->chipram[ChipsetState->CopperPC]);
             ChipsetState->CopperPC += 2;
-            
-            
-            //Decode IR1
-                ChipsetState->CopperIR1 = ChipsetState->CopperIR1 & ChipsetState->CopperIR2 ; // Mask comparison value and remove IR2 bit 0
-                
-                //Kludge to trap too short a waiting time, my copper runs too fast due to lack of real DMA contention
-            if( ChipsetState->CopperIR1 > 0xFF00){
-                if(ChipsetState->CopperIR1 < 0xFF51){
-                    ChipsetState->CopperIR1 = 0xFFDF;
+
+            {
+                uint16_t waitpos = ChipsetState->CopperIR1;
+                uint16_t mask    = ChipsetState->CopperIR2 | 0x0001; // bit 0 always set per HRM
+
+                // Comparador V/H separado com máscara (referência: vAmiga Copper::runComparator)
+                uint8_t vmask = (mask    >> 8) & 0xFF;
+                uint8_t vwait = (waitpos >> 8) & 0xFF;
+                uint8_t hmask = mask    & 0xFE;
+                uint8_t hwait = waitpos & 0xFE;
+                uint8_t vcur  = (VHPOS  >> 8) & 0xFF;
+                uint8_t hcur  = VHPOS   & 0xFE;
+
+                int beam_past = 0;
+                if      ((vcur & vmask) > (vwait & vmask)) beam_past = 1;
+                else if ((vcur & vmask) == (vwait & vmask))
+                    beam_past = ((hcur & hmask) >= (hwait & hmask));
+
+                // Skip instruction (IR2 bit 0 = 1)
+                if (ChipsetState->CopperIR2 & 1) {
+                    if (beam_past) ChipsetState->CopperPC += 4;
+                    ChipsetState->CopperState = 0;
+                    break;
+                }
+
+                // Wait instruction
+                if (beam_past) {
+                    ChipsetState->CopperState = 0;
+                } else {
+                    // Guarda waitpos e mask para o estado de espera
+                    ChipsetState->CopperIR1 = waitpos;
+                    ChipsetState->CopperIR2 = mask;
+                    ChipsetState->CopperState = 3;
                 }
             }
-            
-                //This is a skip instruction
-                if(ChipsetState->CopperIR2 & 1){
-                    
-                    if(VHPOS >= ChipsetState->CopperIR1 ){
-                        ChipsetState->CopperPC += 4;
-                    }
-                    ChipsetState->CopperState = 0;
-                    break;
-                }
-                
-                
-                
-                //This is a wait Instruction, Do we need to wait?
-                if( VHPOS >= ChipsetState->CopperIR1 ){
-                    ChipsetState->CopperState = 0;
-                    break;
-                }
-                
-                //Jump to the wait state
-                ChipsetState->CopperState = 3;
-                break;
+            break;
         
             
             
@@ -87,13 +90,24 @@ void ExecuteCopper(Chipset_t* ChipsetState){
             //Load IR2
             ChipsetState->CopperIR2 = swap((uint16_t*)&ChipsetState->chipram[ChipsetState->CopperPC]);
             ChipsetState->CopperPC += 2;
-            
-            if( (ChipsetState->CopperIR1 & 511) < 0x40){    //Assumes Copper Dangerous bit is alwasy set.
-                ChipsetState->CopperState = 4; // Illegal Reg write halts copper
-                return;
+
+            {
+                uint16_t addr = ChipsetState->CopperIR1 & 0x1FE; // word-aligned register offset
+                // Illegal address check (referência: vAmiga Copper::isIllegalAddress)
+                // CDANG=0: bloqueia addr < 0x80
+                // CDANG=1 + ECS: sem restrição
+                int illegal;
+#if defined(CHIPSET_ECS)
+                illegal = (!ChipsetState->CopperCDANG && addr < 0x80);
+#else
+                illegal = (addr < 0x40) || (!ChipsetState->CopperCDANG && addr < 0x80);
+#endif
+                if (illegal) {
+                    ChipsetState->CopperState = 4;
+                    return;
+                }
+                ChipsetState->WriteWord[addr >> 1](ChipsetState->CopperIR2);
             }
-    
-            ChipsetState->WriteWord[ChipsetState->CopperIR1 & 511](ChipsetState->CopperIR2);
             ChipsetState->CopperState = 0;
             break;
             
@@ -101,9 +115,23 @@ void ExecuteCopper(Chipset_t* ChipsetState){
             
             
         case 3:
-            //The Wait state
-            if( VHPOS >= ChipsetState->CopperIR1){
-                ChipsetState->CopperState = 0;
+            // Wait state — reavalia a condição a cada ciclo
+            {
+                uint16_t waitpos = ChipsetState->CopperIR1;
+                uint16_t mask    = ChipsetState->CopperIR2;
+                uint8_t vmask = (mask    >> 8) & 0xFF;
+                uint8_t vwait = (waitpos >> 8) & 0xFF;
+                uint8_t hmask = mask    & 0xFE;
+                uint8_t hwait = waitpos & 0xFE;
+                uint8_t vcur  = (VHPOS  >> 8) & 0xFF;
+                uint8_t hcur  = VHPOS   & 0xFE;
+
+                int beam_past = 0;
+                if      ((vcur & vmask) > (vwait & vmask)) beam_past = 1;
+                else if ((vcur & vmask) == (vwait & vmask))
+                    beam_past = ((hcur & hmask) >= (hwait & hmask));
+
+                if (beam_past) ChipsetState->CopperState = 0;
             }
             break;
             

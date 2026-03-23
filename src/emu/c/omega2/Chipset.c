@@ -422,6 +422,11 @@ void COP2LCL(uint16_t value){
 
 
 // 88
+// 3C — COPCON: bit 1 = CDANG (Copper dangerous access enable)
+void COPCON(uint16_t value){
+    ChipsetState->CopperCDANG = (value >> 1) & 1;
+}
+
 void COPJMP1(uint16_t value){
     //Load the Copper with COP1LC
     uint32_t* p = (uint32_t*)&RAM24bit[0xDFF080];
@@ -1614,7 +1619,7 @@ void InitChipset(void* chipram, void* memory){
     
     ChipsetState->WriteWord[0x38] = STREQ;
     ChipsetState->WriteWord[0x3A] = STRVBL;
-    ChipsetState->WriteWord[0x3C] = STRHOR;
+    ChipsetState->WriteWord[0x3C] = COPCON;
     ChipsetState->WriteWord[0x3E] = STRLONG;
     
     ChipsetState->WriteWord[0x40] = BLTCON0;

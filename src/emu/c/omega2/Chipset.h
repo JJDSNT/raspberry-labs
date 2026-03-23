@@ -50,6 +50,7 @@ typedef struct{
     uint16_t CopperIR1;
     uint16_t CopperIR2;
     uint32_t VBL;
+    uint8_t  CopperCDANG;  // COPCON bit 1: 0=block addr<0x80, 1=allow all (ECS/AGA)
     
     uint32_t bitplaneFetchActive;
     uint32_t Colour[32];
