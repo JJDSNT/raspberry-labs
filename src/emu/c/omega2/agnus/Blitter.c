@@ -243,7 +243,55 @@ typedef struct{
     
 }Regs_t;
 
-//********************* BLITER SECTION *****************************
+//********************* BLITTER SECTION *****************************
+
+// ---------------------------------------------------------------------------
+// Fill logic — applied to channel D output after the minterm circuit.
+//
+// Ascending mode (DESC=0): scan bits MSB→LSB within each word, words L→R.
+// Descending mode (DESC=1): scan bits LSB→MSB within each word, words R→L.
+//
+// Inclusive fill (IFE): carry toggles on each '1' bit; output = carry.
+// Exclusive fill (EFE): output = D XOR carry; carry toggles on each '1' bit.
+//
+// fill_carry is initialised from FCI (BLTCON1 bit2) at the start of each row
+// and propagates across words within the row (but NOT between rows).
+// ---------------------------------------------------------------------------
+
+static uint16_t fill_word(uint16_t d, uint8_t* carry, int inclusive, int desc) {
+    uint16_t result = 0;
+    uint8_t  c = *carry;
+
+    if (!desc) {
+        // Ascending: MSB first (bit 15 → bit 0)
+        for (int i = 15; i >= 0; i--) {
+            uint8_t bit = (d >> i) & 1;
+            if (inclusive) {
+                if (bit) c ^= 1;
+                if (c) result |= (uint16_t)(1 << i);
+            } else {
+                // Exclusive
+                if (c ^ bit) result |= (uint16_t)(1 << i);
+                if (bit) c ^= 1;
+            }
+        }
+    } else {
+        // Descending: LSB first (bit 0 → bit 15)
+        for (int i = 0; i <= 15; i++) {
+            uint8_t bit = (d >> i) & 1;
+            if (inclusive) {
+                if (bit) c ^= 1;
+                if (c) result |= (uint16_t)(1 << i);
+            } else {
+                if (c ^ bit) result |= (uint16_t)(1 << i);
+                if (bit) c ^= 1;
+            }
+        }
+    }
+
+    *carry = c;
+    return result;
+}
 
 uint16_t logicFunction(int minterm,uint16_t wordA, uint16_t wordB, uint16_t wordC){
     
@@ -576,27 +624,17 @@ void blitter_execute(Chipset_t* chipstate){
             //Area Copy Blitter
             //printf("blit %d: A-%06x (%d) B-%06x (%d) C-%06x (%d) D-%06x (%d) W-%d H-%d\n",count,chipset->bltapt,chipset->bltamod,chipset->bltbpt,chipset->bltbmod,chipset->bltcpt,chipset->bltcmod,chipset->bltdpt,chipset->bltdmod,chipset->bltsizh,chipset->bltsizv);
             
-            int useMask = chipset->bltcon0 >> 8;
-            int shiftA = chipset->bltcon0 >> 12;
-            int shiftB = chipset->bltcon1 >> 12;
-            int minterm = chipset->bltcon0 & 255;
+            int useMask    = chipset->bltcon0 >> 8;
+            int shiftA     = (chipset->bltcon0 >> 12) & 0xF;
+            int shiftB     = (chipset->bltcon1 >> 12) & 0xF;
+            int minterm    = chipset->bltcon0 & 0xFF;
             int xIncrement = 1;
-            int fillmode = (chipset->bltcon1 & 0x18) >> 3; // 1= Inclusive Fill, 2 = Exclusive Fill
-            
-            
-            //if descend mode is on.
-            if((chipset->bltcon1 & 2)){
-                xIncrement = -1;
-                
-                if(fillmode==1){
-                   // printf("NO INCLUSIVE FILL MODE YET!!\n");
-                }
-                
-                if(fillmode==2){
-                    //printf("NO EXCLUSIVE FILL MODE YET!!\n");
-                }
-                
-            }
+            int desc       = (chipset->bltcon1 >> 1) & 1;  // BLTCON1 bit1
+            int ife        = (chipset->bltcon1 >> 3) & 1;  // Inclusive Fill Enable
+            int efe        = (chipset->bltcon1 >> 4) & 1;  // Exclusive Fill Enable
+            int fci        = (chipset->bltcon1 >> 2) & 1;  // Fill Carry In (per-row init)
+
+            if (desc) xIncrement = -1;
             
             
             //all pointers are word addressed and masked for 2meg only
@@ -634,10 +672,12 @@ void blitter_execute(Chipset_t* chipstate){
             
             uint16_t previousA = 0;
             uint16_t previousB = 0;
-            
-           
+
             for(int y=0;y<sizev;++y){
-                
+
+                // Fill carry resets to FCI at the start of each row
+                uint8_t fill_carry = (uint8_t)fci;
+
                 for(int x=0;x<sizeh;++x){
                     uint16_t channelD = 0;
                     
@@ -695,7 +735,13 @@ void blitter_execute(Chipset_t* chipstate){
                     
                     
                     channelD = logicFunction(minterm, channelA, channelB, cdat);
-                    
+
+                    // Fill logic (applied after minterm, before D write)
+                    if (ife)
+                        channelD = fill_word(channelD, &fill_carry, 1, desc);
+                    else if (efe)
+                        channelD = fill_word(channelD, &fill_carry, 0, desc);
+
                     //Zero Flag
                     if(channelD!=0){
                         p = (uint16_t*) &chipstate->chipram[0xDFF002];
