@@ -25,5 +25,9 @@ src/emu/rom/aros.rom
 # ROM duplicata gerada/copiada
 src/emu/c/omega2/memory/AROS.ROM
 
+# ROMs proprietárias (Kickstart — não versionadas)
+src/emu/rom/Kick*.h
+src/emu/rom/kick*.h
+
 # vAmiga (referência externa, não versionado)
 src/vamiga/

@@ -17,6 +17,7 @@ type Config struct {
 	Name        string
 	Description string
 	BootArg     string
+	RomFile     string // optional: ROM filename to pass as rom= in cmdline; empty = use built-in
 }
 
 type ScreenOption struct {
@@ -109,9 +110,9 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 	// O kernel tentará carregá-los do SD card; se não houver SD, continua sem disco.
 	if c.BootArg == "omega" {
 		bootargs += " df0=disk0.adf df1=disk1.adf"
-		// Se houver um arquivo .rom no mesmo diretório do SD, passa rom= na cmdline.
-		if rom := findRomFile(); rom != "" {
-			bootargs += " rom=" + rom
+		// RomFile vazio = sem rom= na cmdline (usa ROM built-in do kernel).
+		if c.RomFile != "" {
+			bootargs += " rom=" + c.RomFile
 		}
 	}
 
@@ -129,27 +130,6 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 func sdImgPath() string {
 	if p := os.Getenv("SD_IMG_PATH"); p != "" {
 		return p
-	}
-	return ""
-}
-
-// findRomFile procura por um arquivo .rom no diretório de discos (../disks/).
-// Retorna apenas o nome base (ex: "kick13.rom") para passar na cmdline.
-func findRomFile() string {
-	disksDir := filepath.Join(filepath.Dir(dtbDir()), "disks")
-	entries, err := os.ReadDir(disksDir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		lower := strings.ToLower(name)
-		if strings.HasSuffix(lower, ".rom") {
-			return name
-		}
 	}
 	return ""
 }
@@ -178,14 +158,17 @@ func loadConfigsFromFile(path string) ([]Config, error) {
 		}
 
 		parts := strings.Split(line, "|")
-		if len(parts) != 3 {
-			return nil, fmt.Errorf("linha %d inválida (formato: Nome|Descrição|bootarg)", lineNum)
+		if len(parts) < 3 || len(parts) > 4 {
+			return nil, fmt.Errorf("linha %d inválida (formato: Nome|Descrição|bootarg[|rom])", lineNum)
 		}
 
 		cfg := Config{
 			Name:        strings.TrimSpace(parts[0]),
 			Description: strings.TrimSpace(parts[1]),
 			BootArg:     strings.TrimSpace(parts[2]),
+		}
+		if len(parts) == 4 {
+			cfg.RomFile = strings.TrimSpace(parts[3])
 		}
 
 		if cfg.Name == "" {
