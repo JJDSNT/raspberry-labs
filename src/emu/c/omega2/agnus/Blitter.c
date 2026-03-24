@@ -705,33 +705,31 @@ void blitter_execute(Chipset_t* chipstate){
                     }
                     
                     
-                    //Masking section
-                    
-                    if(x==0){
-                        channelA = channelA & afwm;
+                    // Barrel shift — must happen BEFORE masking so the shift register
+                    // (previousA/B) holds raw chip-RAM data, not masked data.
+                    // uint32_t arithmetic avoids UB when shift == 0 (no <<16 on int).
+                    //
+                    // ASC  (DESC=0, xIncrement=+1): right-shift; prev is word to the LEFT.
+                    //   result = (prev << 16 | cur) >> shiftA,  take low 16 bits.
+                    // DESC (DESC=1, xIncrement=-1): left-shift;  prev is word to the RIGHT.
+                    //   result = (cur << 16 | prev) >> (16-shiftA), take low 16 bits.
+                    uint16_t shiftedA, shiftedB;
+                    if(xIncrement == -1){
+                        shiftedA = (uint16_t)(((uint32_t)channelA << 16 | (uint32_t)previousA) >> (16 - shiftA));
+                        shiftedB = (uint16_t)(((uint32_t)channelB << 16 | (uint32_t)previousB) >> (16 - shiftB));
+                    } else {
+                        shiftedA = (uint16_t)(((uint32_t)previousA << 16 | (uint32_t)channelA) >> shiftA);
+                        shiftedB = (uint16_t)(((uint32_t)previousB << 16 | (uint32_t)channelB) >> shiftB);
                     }
-                    
-                    if(x==lastHWord){
-                        channelA = channelA & alwm;
-                    }
-                    
-                    uint16_t A = channelA; //Need to record the masked A for next cycle (Thanks to aros-sg on eab)
-                    
-                    //shifting section
-                    if(xIncrement==-1){
-                        
-                        channelA = (previousA >> (16-shiftA)) | (channelA << shiftA);
-                        channelB = (previousB >> (16-shiftB)) | (channelB << shiftB);
-                        
-                    }else{
-                        
-                        channelA = (previousA << (16-shiftA)) | (channelA >> shiftA);
-                        channelB = (previousB << (16-shiftB)) | (channelB >> shiftB);
-                        
-                    }
-                    //previousA = adat;
-                    previousA = A;
-                    previousB = bdat;
+                    previousA = channelA;   // raw (unmasked) — correct shift-register value
+                    previousB = channelB;
+
+                    // First/last word masks applied to the SHIFTED result (per HRM)
+                    if(x == 0)         shiftedA &= afwm;
+                    if(x == lastHWord) shiftedA &= alwm;
+
+                    channelA = shiftedA;
+                    channelB = shiftedB;
                     
                     
                     channelD = logicFunction(minterm, channelA, channelB, cdat);
