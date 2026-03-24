@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/yourname/launch/demo"
 	"github.com/yourname/launch/tui"
 )
 
@@ -19,11 +20,18 @@ func main() {
 	}
 
 	result, ok := m.(tui.Model)
-	if !ok || result.Selected == nil {
+	if !ok || result.IsQuitting() || result.Selected == nil {
 		return
 	}
 
-	if err := result.Selected.LaunchWithOptions(result.Screen, result.Display); err != nil {
+	if err := result.Selected.LaunchWithOptions(
+		result.Screen,
+		result.Display,
+		demo.LaunchSelection{
+			ROMFile:  result.SelectedROM,
+			DiskFile: result.SelectedDisk,
+		},
+	); err != nil {
 		fmt.Fprintf(os.Stderr, "launch error: %v\n", err)
 		os.Exit(1)
 	}

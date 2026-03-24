@@ -1,7 +1,6 @@
 # Nome|Descrição|bootarg[|rom]
 
-Omega KS1.2|Emulador Amiga — Kickstart 1.2 built-in|omega|kick12
-Omega KS1.3|Emulador Amiga — Kickstart 1.3 built-in|omega|kick13
+Omega KS1.2|Emulador Amiga|omega|kick12
 Omega AROS|Emulador Amiga — AROS ROM (livre)|omega|aros.rom
 Juggler|Raytracer clássico Amiga — esferas reflectivas|juggler
 Sprite Bouncer|Demo de sprite com bounce|sprite_bouncer

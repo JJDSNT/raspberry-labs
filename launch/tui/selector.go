@@ -9,10 +9,6 @@ import (
 	"github.com/yourname/launch/demo"
 )
 
-// ---------------------------------------------------------------------------
-// Estilos
-// ---------------------------------------------------------------------------
-
 var (
 	styleBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -52,21 +48,20 @@ var (
 			Italic(true)
 )
 
-// ---------------------------------------------------------------------------
-// Steps — display vem antes da resolução
-// ---------------------------------------------------------------------------
+const (
+	noRomOption  = "(sem rom)"
+	noDiskOption = "(sem disco)"
+)
 
 type step int
 
 const (
 	stepSelectDemo step = iota
+	stepSelectROM
+	stepSelectDisk
 	stepSelectDisplay
-	stepSelectScreen // pulado quando display = SDL
+	stepSelectScreen
 )
-
-// ---------------------------------------------------------------------------
-// Opções
-// ---------------------------------------------------------------------------
 
 var allScreenOptions = []demo.ScreenOption{
 	{Label: "640x480", Width: 640, Height: 480, Depth: 32},
@@ -78,8 +73,6 @@ var sdlScreenOptions = []demo.ScreenOption{
 	{Label: "640x480", Width: 640, Height: 480, Depth: 32},
 }
 
-// GTK é o padrão — suporta qualquer resolução.
-// SDL é limitado a 640x480 no raspi3b emulado.
 var displayOptions = []struct {
 	Label string
 	Note  string
@@ -90,36 +83,41 @@ var displayOptions = []struct {
 	{Label: "Sem janela", Note: "headless / CI", Mode: demo.DisplayNone},
 }
 
-// ---------------------------------------------------------------------------
-// Model
-// ---------------------------------------------------------------------------
-
 type Model struct {
 	demos  []demo.Config
 	cursor int
-
-	step step
+	step   step
 
 	Selected *demo.Config
 	Screen   demo.ScreenOption
 	Display  demo.DisplayMode
 
+	roms         []string
+	disks        []string
+	SelectedROM  string
+	SelectedDisk string
+
 	quitting bool
+	err      error
 }
 
 func NewModel() Model {
+	roms, _ := demo.AvailableROMs()
+	disks, _ := demo.AvailableDisks()
+
+	roms = append([]string{noRomOption}, roms...)
+	disks = append([]string{noDiskOption}, disks...)
+
 	return Model{
 		demos:   demo.All,
 		step:    stepSelectDemo,
 		cursor:  0,
-		Display: demo.DisplayGTK, // padrão
+		Display: demo.DisplayGTK,
 		Screen:  allScreenOptions[0],
+		roms:    roms,
+		disks:   disks,
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Helpers de opções de tela
-// ---------------------------------------------------------------------------
 
 func (m Model) currentScreenOptions() []demo.ScreenOption {
 	if m.Display == demo.DisplaySDL {
@@ -129,13 +127,12 @@ func (m Model) currentScreenOptions() []demo.ScreenOption {
 }
 
 func (m Model) skipScreenStep() bool {
-	// SDL tem só uma resolução — não precisa de step extra
 	return m.Display == demo.DisplaySDL || m.Display == demo.DisplayNone
 }
 
-// ---------------------------------------------------------------------------
-// Bubble Tea interface
-// ---------------------------------------------------------------------------
+func (m Model) needsMediaSelection() bool {
+	return m.Selected != nil && m.Selected.BootArg == "omega"
+}
 
 func (m Model) Init() tea.Cmd {
 	return nil
@@ -161,10 +158,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "esc":
 			switch m.step {
-			case stepSelectDisplay:
+			case stepSelectROM:
 				m.step = stepSelectDemo
 				m.cursor = m.selectedDemoIndex()
-
+			case stepSelectDisk:
+				m.step = stepSelectROM
+				m.cursor = m.selectedROMIndex()
+			case stepSelectDisplay:
+				if m.needsMediaSelection() {
+					m.step = stepSelectDisk
+					m.cursor = m.selectedDiskIndex()
+				} else {
+					m.step = stepSelectDemo
+					m.cursor = m.selectedDemoIndex()
+				}
 			case stepSelectScreen:
 				m.step = stepSelectDisplay
 				m.cursor = m.selectedDisplayIndex()
@@ -175,6 +182,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case stepSelectDemo:
 				selected := m.demos[m.cursor]
 				m.Selected = &selected
+
+				if m.needsMediaSelection() {
+					m.step = stepSelectROM
+					m.cursor = m.selectedROMIndex()
+				} else {
+					m.step = stepSelectDisplay
+					m.cursor = m.selectedDisplayIndex()
+				}
+
+			case stepSelectROM:
+				if len(m.roms) > 0 {
+					chosen := m.roms[m.cursor]
+					if chosen == noRomOption {
+						m.SelectedROM = ""
+					} else {
+						m.SelectedROM = chosen
+					}
+				}
+				m.step = stepSelectDisk
+				m.cursor = m.selectedDiskIndex()
+
+			case stepSelectDisk:
+				if len(m.disks) > 0 {
+					chosen := m.disks[m.cursor]
+					if chosen == noDiskOption {
+						m.SelectedDisk = ""
+					} else {
+						m.SelectedDisk = chosen
+					}
+				}
 				m.step = stepSelectDisplay
 				m.cursor = m.selectedDisplayIndex()
 
@@ -182,13 +219,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Display = displayOptions[m.cursor].Mode
 
 				if m.skipScreenStep() {
-					// SDL/headless: resolve a tela automaticamente e lança
 					opts := m.currentScreenOptions()
 					m.Screen = opts[0]
 					return m, tea.Quit
 				}
 
-				// GTK: vai para seleção de resolução
 				m.step = stepSelectScreen
 				m.cursor = m.selectedScreenIndex()
 
@@ -211,6 +246,10 @@ func (m Model) View() string {
 	switch m.step {
 	case stepSelectDemo:
 		return m.viewDemo()
+	case stepSelectROM:
+		return m.viewROMs()
+	case stepSelectDisk:
+		return m.viewDisks()
 	case stepSelectDisplay:
 		return m.viewDisplayOptions()
 	case stepSelectScreen:
@@ -219,10 +258,6 @@ func (m Model) View() string {
 
 	return ""
 }
-
-// ---------------------------------------------------------------------------
-// Views
-// ---------------------------------------------------------------------------
 
 func (m Model) viewDemo() string {
 	title := styleTitle.Render("  Bare Metal Demo Launcher")
@@ -250,8 +285,57 @@ func (m Model) viewDemo() string {
 
 	help := styleHelp.Render("↑/↓ navegar   ↵ selecionar   q sair")
 	content := fmt.Sprintf("%s\n%s\n%s", title, items, help)
-
 	return styleBorder.Render(content) + "\n"
+}
+
+func (m Model) viewROMs() string {
+	title := styleTitle.Render("  Selecione a ROM")
+
+	romLabel := m.SelectedROM
+	if romLabel == "" {
+		romLabel = "nenhuma"
+	}
+
+	summary := styleSummary.Render(fmt.Sprintf(
+		"Demo: %s   |   ROM: %s",
+		m.selectedDemoName(),
+		romLabel,
+	))
+
+	return styleBorder.Render(fmt.Sprintf("%s\n%s\n%s\n%s",
+		title,
+		summary,
+		m.renderSimpleList(m.roms),
+		styleHelp.Render("↑/↓ navegar   ↵ selecionar   esc voltar   q sair"),
+	)) + "\n"
+}
+
+func (m Model) viewDisks() string {
+	title := styleTitle.Render("  Selecione o disco")
+
+	romLabel := m.SelectedROM
+	if romLabel == "" {
+		romLabel = "nenhuma"
+	}
+
+	diskLabel := m.SelectedDisk
+	if diskLabel == "" {
+		diskLabel = "nenhum"
+	}
+
+	summary := styleSummary.Render(fmt.Sprintf(
+		"Demo: %s   |   ROM: %s   |   Disco: %s",
+		m.selectedDemoName(),
+		romLabel,
+		diskLabel,
+	))
+
+	return styleBorder.Render(fmt.Sprintf("%s\n%s\n%s\n%s",
+		title,
+		summary,
+		m.renderSimpleList(m.disks),
+		styleHelp.Render("↑/↓ navegar   ↵ selecionar   esc voltar   q sair"),
+	)) + "\n"
 }
 
 func (m Model) viewDisplayOptions() string {
@@ -320,9 +404,29 @@ func (m Model) viewScreenOptions() string {
 	return styleBorder.Render(content) + "\n"
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+func (m Model) renderSimpleList(items []string) string {
+	if len(items) == 0 {
+		return styleNote.Render("  nenhum arquivo encontrado em ../disks")
+	}
+
+	out := ""
+	for i, item := range items {
+		cursor := "  "
+		label := styleNormal.Render(item)
+		if i == m.cursor {
+			cursor = styleCursor.Render("▶ ")
+			label = styleSelected.Render(item)
+		}
+
+		line := fmt.Sprintf("%s%s", cursor, label)
+		if i < len(items)-1 {
+			out += line + "\n"
+		} else {
+			out += line
+		}
+	}
+	return out
+}
 
 func (m Model) maxCursor() int {
 	switch m.step {
@@ -331,14 +435,21 @@ func (m Model) maxCursor() int {
 			return 0
 		}
 		return len(m.demos) - 1
-
+	case stepSelectROM:
+		if len(m.roms) == 0 {
+			return 0
+		}
+		return len(m.roms) - 1
+	case stepSelectDisk:
+		if len(m.disks) == 0 {
+			return 0
+		}
+		return len(m.disks) - 1
 	case stepSelectDisplay:
 		return len(displayOptions) - 1
-
 	case stepSelectScreen:
 		return len(m.currentScreenOptions()) - 1
 	}
-
 	return 0
 }
 
@@ -382,9 +493,47 @@ func (m Model) selectedDisplayIndex() int {
 func (m Model) selectedScreenIndex() int {
 	opts := m.currentScreenOptions()
 	for i, s := range opts {
-		if s.Width == m.Screen.Width &&
-			s.Height == m.Screen.Height &&
-			s.Depth == m.Screen.Depth {
+		if s.Width == m.Screen.Width && s.Height == m.Screen.Height && s.Depth == m.Screen.Depth {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m Model) selectedROMIndex() int {
+	if m.SelectedROM == "" {
+		for i, rom := range m.roms {
+			if rom == noRomOption {
+				return i
+			}
+		}
+		return 0
+	}
+
+	for i, rom := range m.roms {
+		if rom == m.SelectedROM {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m Model) IsQuitting() bool {
+	return m.quitting
+}
+
+func (m Model) selectedDiskIndex() int {
+	if m.SelectedDisk == "" {
+		for i, disk := range m.disks {
+			if disk == noDiskOption {
+				return i
+			}
+		}
+		return 0
+	}
+
+	for i, disk := range m.disks {
+		if disk == m.SelectedDisk {
 			return i
 		}
 	}

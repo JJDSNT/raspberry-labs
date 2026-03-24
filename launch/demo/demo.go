@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -17,7 +18,7 @@ type Config struct {
 	Name        string
 	Description string
 	BootArg     string
-	RomFile     string // optional: ROM filename to pass as rom= in cmdline; empty = use built-in
+	RomFile     string // opcional: ROM default definida em demos.txt
 }
 
 type ScreenOption struct {
@@ -35,6 +36,11 @@ const (
 	DisplayNone DisplayMode = "none"
 )
 
+type LaunchSelection struct {
+	ROMFile  string
+	DiskFile string
+}
+
 // ---------------------------------------------------------------------------
 // Dados
 // ---------------------------------------------------------------------------
@@ -51,7 +57,7 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// Init (OBRIGATÓRIO carregar demos.txt)
+// Init
 // ---------------------------------------------------------------------------
 
 func init() {
@@ -96,23 +102,79 @@ func kernelPath() string {
 	return "kernel8.img"
 }
 
+func sdImgPath() string {
+	if p := os.Getenv("SD_IMG_PATH"); p != "" {
+		return p
+	}
+	return ""
+}
+
+func disksDir() string {
+	if p := os.Getenv("DISKS_DIR"); p != "" {
+		return p
+	}
+	return "../disks"
+}
+
+// ---------------------------------------------------------------------------
+// Listagem de arquivos em disks/
+// ---------------------------------------------------------------------------
+
+func listFilesByExt(dir string, exts ...string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed := map[string]bool{}
+	for _, ext := range exts {
+		allowed[strings.ToLower(ext)] = true
+	}
+
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if allowed[ext] {
+			out = append(out, e.Name())
+		}
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
+func AvailableROMs() ([]string, error) {
+	return listFilesByExt(disksDir(), ".rom", ".bin")
+}
+
+func AvailableDisks() ([]string, error) {
+	return listFilesByExt(disksDir(), ".adf")
+}
+
 // ---------------------------------------------------------------------------
 // Launch
 // ---------------------------------------------------------------------------
 
-func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) error {
+func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode, sel LaunchSelection) error {
 	bootargs := fmt.Sprintf(
 		"demo=%s width=%d height=%d depth=%d",
 		c.BootArg, screen.Width, screen.Height, screen.Depth,
 	)
 
-	// Para o Omega, adiciona os nomes fixos dos discos na cmdline.
-	// O kernel tentará carregá-los do SD card; se não houver SD, continua sem disco.
 	if c.BootArg == "omega" {
-		bootargs += " df0=disk0.adf df1=disk1.adf"
-		// RomFile vazio = sem rom= na cmdline (usa ROM built-in do kernel).
-		if c.RomFile != "" {
-			bootargs += " rom=" + c.RomFile
+		if sel.DiskFile != "" {
+			bootargs += " df0=" + sel.DiskFile
+		}
+
+		rom := sel.ROMFile
+		if rom == "" {
+			rom = c.RomFile
+		}
+		if rom != "" {
+			bootargs += " rom=" + rom
 		}
 	}
 
@@ -125,13 +187,6 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode) err
 	}
 
 	return runQEMU(kernelPath(), patched, display, screen, sdImgPath())
-}
-
-func sdImgPath() string {
-	if p := os.Getenv("SD_IMG_PATH"); p != "" {
-		return p
-	}
-	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -223,9 +278,6 @@ func patchDTB(base, patched, bootargs string) error {
 // ---------------------------------------------------------------------------
 
 func runQEMU(kernel, dtb string, display DisplayMode, screen ScreenOption, sdImg string) error {
-	// Limitação do QEMU raspi3b: o display SDL tem tamanho fixo 640x480.
-	// Para outras resoluções, GTK é o único display que escala corretamente.
-	// Se o usuário escolheu SDL mas a resolução não é 640x480, avisa e usa GTK.
 	effectiveDisplay := display
 	if display == DisplaySDL && (screen.Width != 640 || screen.Height != 480) {
 		fmt.Fprintf(os.Stderr,
@@ -243,7 +295,6 @@ func runQEMU(kernel, dtb string, display DisplayMode, screen ScreenOption, sdImg
 		"-display", string(effectiveDisplay),
 	}
 
-	// Adiciona SD card se a imagem existir
 	if sdImg != "" {
 		if _, err := os.Stat(sdImg); err == nil {
 			args = append(args, "-drive", fmt.Sprintf("file=%s,format=raw,if=sd", sdImg))

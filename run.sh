@@ -89,6 +89,12 @@ create_sdcard_image() {
         exit 1
     }
 
+    command -v mformat >/dev/null 2>&1 || {
+        echo "[ERROR] mformat não encontrado"
+        echo "[HINT]  sudo apt install mtools"
+        exit 1
+    }
+
     download_firmware
 
     local SIZE_MB=128
@@ -119,48 +125,41 @@ EOF
 
     # cmdline.txt
     local CMDLINE="demo=flame"
-    if [ -f "$DISKS_DIR/disk0.adf" ]; then
-        CMDLINE="demo=omega df0=disk0.adf df1=disk1.adf"
-        for ROM_FILE in "$DISKS_DIR"/*.rom "$DISKS_DIR"/*.ROM; do
-            [ -f "$ROM_FILE" ] || continue
-            ROM_NAME="$(basename "$ROM_FILE")"
-            CMDLINE="$CMDLINE rom=$ROM_NAME"
-            echo "[SD] ROM: $ROM_NAME"
-            mcopy -i "$SDCARD_IMG" "$ROM_FILE" "::$ROM_NAME"
-            break
-        done
-    fi
     printf '%s' "$CMDLINE" > /tmp/rpi_cmdline.txt
     mcopy -i "$SDCARD_IMG" /tmp/rpi_cmdline.txt "::cmdline.txt"
     echo "[SD] cmdline: $CMDLINE"
 
-    # ADFs
-    local ADDED=0
-    for n in 0 1; do
-        local ADF="$DISKS_DIR/disk${n}.adf"
-        if [ -f "$ADF" ]; then
-            echo "[SD] + disk${n}.adf ($(du -h "$ADF" | cut -f1))"
-            mcopy -i "$SDCARD_IMG" "$ADF" "::disk${n}.adf"
-            ADDED=$((ADDED + 1))
+    # Copia todo o conteúdo de ./disks para a raiz da imagem
+    local COPIED=0
+    if [ -d "$DISKS_DIR" ]; then
+        shopt -s nullglob dotglob
+        local DISK_ITEMS=("$DISKS_DIR"/*)
+        shopt -u dotglob
+
+        if [ ${#DISK_ITEMS[@]} -gt 0 ]; then
+            echo "[SD] Copiando conteúdo de $DISKS_DIR..."
+            mcopy -i "$SDCARD_IMG" -s "${DISK_ITEMS[@]}" ::
+            COPIED=${#DISK_ITEMS[@]}
+        else
+            echo "[SD] $DISKS_DIR está vazio"
         fi
-    done
+        shopt -u nullglob
+    else
+        echo "[SD] Diretório $DISKS_DIR não existe"
+    fi
 
     echo ""
-    echo "[SD] sdcard.img pronto! ($ADDED disco(s))"
+    echo "[SD] sdcard.img pronto! ($COPIED item(ns) copiado(s) de disks/)"
     echo "     QEMU:     ./run.sh  (usa sdcard.img automaticamente)"
     echo "     Hardware: sudo dd if=sdcard.img of=/dev/sdX bs=4M status=progress && sync"
     echo ""
 }
 
-if [ "$CREATE_SD" -eq 1 ]; then
-    create_sdcard_image
-fi
-
 # ---------------------------------------------------------------------------
 # Pré-requisitos
 # ---------------------------------------------------------------------------
 
-command -v cargo  >/dev/null 2>&1 || { echo "[ERROR] cargo não encontrado"; exit 1; }
+command -v cargo >/dev/null 2>&1 || { echo "[ERROR] cargo não encontrado"; exit 1; }
 command -v go >/dev/null 2>&1 || { echo "[ERROR] go não encontrado"; exit 1; }
 command -v fdtput >/dev/null 2>&1 || {
     echo "[ERROR] fdtput não encontrado"
@@ -188,16 +187,16 @@ fi
 
 mkdir -p "$DTB_DIR"
 if [ ! -f "$DTB" ]; then
-        echo "[DTB] Baixando para $DTB..."
-        if command -v curl >/dev/null 2>&1; then
-            curl -L -o "$DTB" "$DTB_URL"
-        elif command -v wget >/dev/null 2>&1; then
-            wget -O "$DTB" "$DTB_URL"
-        else
-            echo "[ERROR] curl ou wget necessário para baixar o DTB"
-            exit 1
-        fi
-        echo "[DTB] OK — $DTB pronto"
+    echo "[DTB] Baixando para $DTB..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -L -o "$DTB" "$DTB_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "$DTB" "$DTB_URL"
+    else
+        echo "[ERROR] curl ou wget necessário para baixar o DTB"
+        exit 1
+    fi
+    echo "[DTB] OK — $DTB pronto"
 fi
 
 # ---------------------------------------------------------------------------
@@ -235,6 +234,11 @@ if [ ! -f "$KERNEL" ]; then
 fi
 
 echo "[BUILD] OK — $KERNEL pronto"
+
+# Cria a imagem SD somente depois que o kernel existir
+if [ "$CREATE_SD" -eq 1 ]; then
+    create_sdcard_image
+fi
 
 # ---------------------------------------------------------------------------
 # Launcher TUI (QEMU)
