@@ -30,4 +30,4 @@ src/emu/rom/Kick*.h
 src/emu/rom/kick*.h
 
 # vAmiga (referência externa, não versionado)
-src/vamiga/
+referencias/

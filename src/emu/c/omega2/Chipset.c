@@ -1895,6 +1895,47 @@ static void sched_vbl_handler(void) {
     probe_emit(EVT_VBL, m68k_get_reg(NULL, M68K_REG_PC), ChipsetState->DMACONR);
     ChipsetState->WriteWord[0x88](0);                      // Copper: restart from COP1LC
     ChipsetState->VBL = 1;                                 // notify host: frame complete
+
+    // Debug: AROS boot progress
+    static uint32_t s_vbl = 0;
+    static uint32_t s_prev_pc = 0;
+    s_vbl++;
+    uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
+
+    // While in the AROS ROM checksum loop (F80112-F8011A), log counter every 20 VBLs
+    if(pc >= 0xF80110 && pc <= 0xF8011E) {
+        if(s_vbl % 20 == 0) {
+            omega_log_hex("AROS chk D0(ctr)", m68k_get_reg(NULL, M68K_REG_D0));
+            omega_log_hex("AROS chk D1(sum)", m68k_get_reg(NULL, M68K_REG_D1));
+        }
+    }
+    // Detect first VBL where CPU has left the checksum range
+    else if(s_prev_pc >= 0xF80110 && s_prev_pc <= 0xF8011E) {
+        omega_log_hex("AROS chk DONE pc", pc);
+        omega_log_hex("AROS chk D1(sum)", m68k_get_reg(NULL, M68K_REG_D1));
+    }
+    // After checksum: one-time register dump at scan function entry (FE9800-FE980E)
+    else if(pc >= 0xFE9800 && pc <= 0xFE980E) {
+        static int s_scan_dumped = 0;
+        if(!s_scan_dumped) {
+            s_scan_dumped = 1;
+            omega_log_hex("SCAN D0(start)", m68k_get_reg(NULL, M68K_REG_D0));
+            omega_log_hex("SCAN D4(end?)",  m68k_get_reg(NULL, M68K_REG_D4));
+            omega_log_hex("SCAN A3(frame)", m68k_get_reg(NULL, M68K_REG_A3));
+            omega_log_hex("SCAN A4(callee)",m68k_get_reg(NULL, M68K_REG_A4));
+            omega_log_hex("SCAN SR",        m68k_get_reg(NULL, M68K_REG_SR));
+            omega_log_hex("SCAN SP",        m68k_get_reg(NULL, M68K_REG_SP));
+        }
+    }
+    // After checksum: log PC + INTENA every 10 VBLs to track boot progress
+    else if(s_vbl % 10 == 0) {
+        omega_log_hex("AROS boot pc",    pc);
+        omega_log_hex("AROS INTENAR",    ChipsetState->INTENAR);
+        omega_log_hex("AROS INTREQR",    ChipsetState->INTREQR);
+        omega_log_hex("AROS DMACONR",    ChipsetState->DMACONR);
+    }
+
+    s_prev_pc = pc;
 }
 
 uint32_t IncrementVHPOS(void){

@@ -19,7 +19,7 @@ typedef enum {
     EVT_CIA_READ,       // a=addr,       b=value
     EVT_COPPER_MOVE,    // a=reg_offset, b=value
     EVT_COPPER_WAIT,    // a=waitpos,    b=mask
-    EVT_CPU_STOP,       // a=PC,         b=SR
+    EVT_CPU_STOP,       // a=PC,         b=new_SR (imediato do STOP)
     EVT_CPU_EXCEPT,     // a=vector_addr,b=PC
     EVT_FLOPPY_CMD,     // a=DSKLEN,     b=DSKPTR
     EVT_SIGNAL_SENT,    // a=task_ptr,   b=signals

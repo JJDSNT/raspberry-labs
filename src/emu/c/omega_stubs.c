@@ -24,5 +24,16 @@ void* realloc(void* ptr, size_t size) { (void)ptr; (void)size; return NULL; }
 void* calloc(size_t n, size_t size)   { (void)n; (void)size; return NULL; }
 
 // cpu_instr_callback — chamado pelo Musashi a cada instrução (M68K_INSTRUCTION_HOOK).
-// Stub vazio: sem disassembler em bare-metal.
-void cpu_instr_callback(void) {}
+// Nota: o hook dispara ANTES de REG_IR ser carregado (ver m68kcpu.c linha 666-672).
+// REG_PC aponta para a instrução prestes a executar — lemos o opcode via memória.
+// Para STOP (0x4E72 xxxx): emite EVT_CPU_STOP(PC, new_SR) onde new_SR é o imediato.
+#include "omega2/cpu/m68k.h"
+#include "omega2/memory/Memory.h"
+#include "omega2/shared/omega_probe.h"
+
+void cpu_instr_callback(void) {
+    unsigned int pc = m68k_get_reg(NULL, M68K_REG_PC);
+    if(cpu_read_word(pc) == 0x4E72) {
+        probe_emit(EVT_CPU_STOP, pc, cpu_read_word(pc + 2));
+    }
+}
