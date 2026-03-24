@@ -357,7 +357,8 @@ void BitplaneExecuteHires(Chipset_t* ChipsetState){
             ChipsetState->bitplaneFetchCountdown = 0; // Start Countdown
             fetchCount = 0;
             int VPOS = ((ChipsetState->VHPOS & 0x1FF00) >> 8);
-            ChipsetState->FrameBufferLine = &ChipsetState->frameBuffer[800*(VPOS) + (ChipsetState->HSTART << 1)];
+            ChipsetState->FrameBufferLine = &ChipsetState->frameBuffer[
+                ChipsetState->frameBufferStride * VPOS + (ChipsetState->HSTART << 1)];
             ChipsetState->FrameBufferLineIndex = 0;
             ChipsetState->needsRedraw = 1;
             
@@ -544,7 +545,8 @@ void BitplaneExecuteLores(Chipset_t* ChipsetState){
             ChipsetState->bitplaneFetchCountdown = 0; // Start Countdown
             fetchCount = 0;
             int VPOS = ((ChipsetState->VHPOS & 0x1FF00) >> 8);
-            ChipsetState->FrameBufferLine = &ChipsetState->frameBuffer[800*(VPOS) + (ChipsetState->HSTART << 1)];
+            ChipsetState->FrameBufferLine = &ChipsetState->frameBuffer[
+                ChipsetState->frameBufferStride * VPOS + (ChipsetState->HSTART << 1)];
             ChipsetState->FrameBufferLineIndex = 0;
         }
     

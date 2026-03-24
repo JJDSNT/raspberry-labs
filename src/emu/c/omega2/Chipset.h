@@ -72,7 +72,7 @@ typedef struct{
     
     //Host Framebuffer
     uint32_t* frameBuffer;
-    int32_t frameBufferPitch;
+    int32_t frameBufferStride; // pixel stride (pitch in uint32_t units, not bytes)
     uint32_t* FrameBufferLine;
     uint32_t FrameBufferLineIndex;
     //uint32_t framebufferIndex;          //I don't think I need this anymore

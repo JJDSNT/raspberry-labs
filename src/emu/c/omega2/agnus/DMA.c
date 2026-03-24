@@ -170,7 +170,8 @@ void DMAExecute(void* address, uint32_t* framebuffer){
                 
                 
                 //Calcuate the index into the famebuffer
-                uint32_t index =  ((ChipsetState->sprite[i].VPOS >> 8) * 800) + (x << 1) + 2;
+                uint32_t index = ((ChipsetState->sprite[i].VPOS >> 8) * (uint32_t)ChipsetState->frameBufferStride)
+                               + (uint32_t)(x << 1) + 2;
                 //printf("Sprite x:%d\n",x);
                 
  

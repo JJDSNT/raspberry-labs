@@ -24,16 +24,46 @@ static Omega_t* g_omega = NULL;
 extern Chipset_t* ChipsetState;
 
 // Ajuste de posição do display Amiga no framebuffer.
-// O beam começa 20 linhas acima e 180 pixels à esquerda da área visível.
-#define FB_LINE_OFFSET  20
-#define FB_PIXEL_OFFSET 180
-#define FB_WIDTH        800
+//
+// O beam começa acima e à esquerda da área visível.  A fórmula garante que
+// o primeiro pixel do DIW (quando VPOS = DIWSTRT_V e HPOS = DIWSTRT_H)
+// aterrise exatamente na posição desejada no framebuffer do host.
+//
+//   FrameBufferLine = &frameBuffer[stride * VPOS + HSTART*2]
+//   frameBuffer     = fb - (stride * FB_LINE_OFFSET + pixel_offset)
+//
+//   → pixel_offset = HSTART*2 - x_start
+//
+// Onde x_start é a coluna no host onde queremos que o display Amiga comece.
+// Centralizamos: x_start = (stride - AMIGA_LORES_HOST_WIDTH) / 2.
+// Para stride == 640, x_start == 0 → imagem alinhada à esquerda.
+//
+#define FB_LINE_OFFSET           20   // linhas de recuo vertical (beam start)
+#define AMIGA_LORES_HOST_WIDTH  640   // lores: 320 pixels × 2 (cada pixel duplicado)
+#define AMIGA_HSTART_STANDARD   129   // DIWSTRT_H padrão PAL (0x81) usado como fallback
 
 static void apply_fb_offset(Chipset_t* cs) {
     uint32_t* fb = omega_host_framebuffer();
     if (!fb) return;
-    cs->frameBufferPitch = omega_host_pitch();
-    cs->frameBuffer = fb - (FB_WIDTH * FB_LINE_OFFSET + FB_PIXEL_OFFSET);
+
+    // omega_host_pitch() retorna pitch em bytes; converter para pixels (uint32_t).
+    int32_t stride_px = omega_host_pitch() / (int32_t)sizeof(uint32_t);
+    if (stride_px <= 0) stride_px = 640;
+    cs->frameBufferStride = stride_px;
+
+    // HSTART: atualizado pelo Copper/CPU quando DIWSTRT é escrito.
+    // Antes da primeira escrita (init) vale 0 — usar padrão PAL.
+    int32_t hstart   = (cs->HSTART > 0) ? (int32_t)cs->HSTART
+                                         : AMIGA_HSTART_STANDARD;
+    int32_t hstart2  = hstart * 2; // host pixels até o início da janela de display
+
+    // Centralizar a imagem Amiga no framebuffer; para larguras <= 640 alinhar à esquerda.
+    int32_t x_start  = (stride_px > AMIGA_LORES_HOST_WIDTH)
+                       ? (stride_px - AMIGA_LORES_HOST_WIDTH) / 2
+                       : 0;
+    int32_t pixel_offset = hstart2 - x_start;
+
+    cs->frameBuffer = fb - (stride_px * FB_LINE_OFFSET + pixel_offset);
 }
 
 void omega_init(void) {
