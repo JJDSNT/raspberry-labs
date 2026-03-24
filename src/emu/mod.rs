@@ -68,26 +68,14 @@ pub fn run(fb: Framebuffer) -> ! {
     //    "kick12" / "kick13" são sentinels que selecionam a ROM built-in sem tocar o SD.
     //    Qualquer outro nome tenta carregar do SD card; falha cai no built-in padrão.
     if let Some(name) = bootargs::rom() {
-        match name {
-            "kick12" => {
-                crate::log!("EMU", "rom: built-in KS1.2 selected");
-                host::set_kickstart_version(12);
-            }
-            "kick13" => {
-                crate::log!("EMU", "rom: built-in KS1.3 selected");
-                host::set_kickstart_version(13);
-            }
-            _ => {
-                crate::log!("EMU", "rom: loading '{}'", name);
-                let buf = unsafe { core::slice::from_raw_parts_mut(ROM_ADDR as *mut u8, ROM_SIZE) };
-                let n = crate::fs::fat32::load(name, buf);
-                if n > 0 {
-                    crate::log!("EMU", "rom: {} bytes loaded", n);
-                    host::set_rom(ROM_ADDR as *const u8, n);
-                } else {
-                    crate::log!("EMU", "rom: load failed, using built-in");
-                }
-            }
+        crate::log!("EMU", "rom: loading '{}'", name);
+        let buf = unsafe { core::slice::from_raw_parts_mut(ROM_ADDR as *mut u8, ROM_SIZE) };
+        let n = crate::fs::fat32::load(name, buf);
+        if n > 0 {
+            crate::log!("EMU", "rom: {} bytes loaded", n);
+            host::set_rom(ROM_ADDR as *const u8, n);
+        } else {
+            crate::log!("EMU", "rom: '{}' not found on SD, using built-in AROS", name);
         }
     }
 

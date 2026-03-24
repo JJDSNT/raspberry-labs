@@ -12,15 +12,10 @@ static FB_PITCH: AtomicI32      = AtomicI32::new(0);
 
 static ROM_PTR:     AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
 static ROM_SIZE:    AtomicUsize    = AtomicUsize::new(0);
-static KS_VERSION:  AtomicI32      = AtomicI32::new(0); // 0 = default, 12 = KS1.2, 13 = KS1.3
 
 pub fn set_rom(ptr: *const u8, size: usize) {
     ROM_PTR.store(ptr as *mut u8, Ordering::Release);
     ROM_SIZE.store(size, Ordering::Release);
-}
-
-pub fn set_kickstart_version(v: i32) {
-    KS_VERSION.store(v, Ordering::Release);
 }
 
 #[no_mangle]
@@ -31,11 +26,6 @@ pub extern "C" fn omega_host_rom_ptr() -> *const u8 {
 #[no_mangle]
 pub extern "C" fn omega_host_rom_size() -> usize {
     ROM_SIZE.load(Ordering::Acquire)
-}
-
-#[no_mangle]
-pub extern "C" fn omega_host_kickstart_version() -> core::ffi::c_int {
-    KS_VERSION.load(Ordering::Acquire)
 }
 
 // ---------------------------------------------------------------------------
