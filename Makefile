@@ -8,21 +8,15 @@ AROS_MAIN = src/emu/c/omega2/memory/aros_main.h
 AROS_EXT  = src/emu/c/omega2/memory/aros_ext.h
 GEN_ROM   = python3 src/emu/rom/gen_rom.py
 
-.PHONY: le be ks12 aros clean
-
-# Build with built-in KS1.2 (default)
-ks12: _rom_ks12 le
+.PHONY: le be aros clean
 
 # Build with AROS ROM (generates headers from src/arosrom/ if needed)
-aros: _rom_aros le
+# KS1.2 / KS1.3 are selected at boot time via the launcher TUI — no make target needed.
+aros: _gen_aros le
 
-_rom_ks12:
-	@rm -f $(AROS_MAIN) $(AROS_EXT)
-	@echo "[ROM] KS1.2 (built-in)"
-
-_rom_aros:
+_gen_aros:
 	@$(GEN_ROM)
-	@echo "[ROM] AROS"
+	@echo "[ROM] AROS headers generated"
 
 le:
 	cargo build --release --target $(TARGET_LE)

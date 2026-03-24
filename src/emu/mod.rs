@@ -24,8 +24,10 @@ const ADF_SIZE: usize = 901_120;
 const DF0_ADDR: usize = 0x0200_0000; // 32 MB mark
 const DF1_ADDR: usize = 0x0210_0000; // 33 MB mark
 
-// Buffer para ROM carregada do SD card (512 KB = Kickstart padrão)
-const ROM_SIZE:  usize = 512 * 1024;
+// Buffer para ROM carregada do SD card.
+// 1 MB para acomodar AROS (ext 512KB + main 512KB concatenados);
+// Kickstart 1.2 / 1.3 usa apenas os primeiros 512 KB.
+const ROM_SIZE:  usize = 1024 * 1024;
 const ROM_ADDR:  usize = 0x0220_0000; // 34 MB mark
 
 pub struct OmegaEmu {
@@ -62,16 +64,30 @@ fn read_adf(drive: i32, name: &str, addr: usize) -> bool {
 pub fn run(fb: Framebuffer) -> ! {
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
 
-    // 1. Carrega ROM do SD card (se especificada), antes de omega_init().
+    // 1. Seleciona ROM antes de omega_init().
+    //    "kick12" / "kick13" são sentinels que selecionam a ROM built-in sem tocar o SD.
+    //    Qualquer outro nome tenta carregar do SD card; falha cai no built-in padrão.
     if let Some(name) = bootargs::rom() {
-        crate::log!("EMU", "rom: loading '{}'", name);
-        let buf = unsafe { core::slice::from_raw_parts_mut(ROM_ADDR as *mut u8, ROM_SIZE) };
-        let n = crate::fs::fat32::load(name, buf);
-        if n > 0 {
-            crate::log!("EMU", "rom: {} bytes loaded", n);
-            host::set_rom(ROM_ADDR as *const u8, n);
-        } else {
-            crate::log!("EMU", "rom: load failed, using built-in");
+        match name {
+            "kick12" => {
+                crate::log!("EMU", "rom: built-in KS1.2 selected");
+                host::set_kickstart_version(12);
+            }
+            "kick13" => {
+                crate::log!("EMU", "rom: built-in KS1.3 selected");
+                host::set_kickstart_version(13);
+            }
+            _ => {
+                crate::log!("EMU", "rom: loading '{}'", name);
+                let buf = unsafe { core::slice::from_raw_parts_mut(ROM_ADDR as *mut u8, ROM_SIZE) };
+                let n = crate::fs::fat32::load(name, buf);
+                if n > 0 {
+                    crate::log!("EMU", "rom: {} bytes loaded", n);
+                    host::set_rom(ROM_ADDR as *const u8, n);
+                } else {
+                    crate::log!("EMU", "rom: load failed, using built-in");
+                }
+            }
         }
     }
 

@@ -31,6 +31,9 @@ void omega_host_audio_sample(int16_t left, int16_t right);
 // Retorna NULL/0 se nenhuma ROM foi carregada (usa built-in como fallback).
 const uint8_t* omega_host_rom_ptr(void);
 size_t         omega_host_rom_size(void);
+// Retorna 12 (KS1.2) ou 13 (KS1.3) para selecionar a ROM built-in quando
+// nenhuma ROM dinâmica foi carregada do SD card.
+int            omega_host_kickstart_version(void);
 
 // Convenience: log "prefix: 0xXXXXXXXX" without needing sprintf.
 static inline void omega_log_hex(const char* prefix, uint32_t val) {

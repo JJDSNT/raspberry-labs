@@ -918,11 +918,20 @@ Omega_t* InitRAM(int RAM32bitSize){
         const uint8_t* dyn_rom  = omega_host_rom_ptr();
         size_t         dyn_size = omega_host_rom_size();
         if(dyn_rom != (void*)0 && dyn_size > 0){
-            // ROM carregada dinamicamente do SD card pelo kernel
-            omega_host_log("Omega: copying dynamic ROM from SD");
-            size_t copy_size = dyn_size < 0x80000 ? dyn_size : 0x80000;
-            for(size_t i = 0; i < copy_size; ++i){
-                RAM24bit[0xF80000 + i] = dyn_rom[i];
+            if(dyn_size >= 0x100000){
+                // ROM 1MB (ex: AROS): primeira metade = ext (0xE00000),
+                // segunda metade = main (0xF80000) — mesma convenção do gen_rom.py Modo 2.
+                omega_host_log("Omega: copying dynamic ROM 1MB (ext+main)");
+                for(size_t i = 0; i < 0x80000; ++i)
+                    RAM24bit[0xE00000 + i] = dyn_rom[i];
+                for(size_t i = 0; i < 0x80000; ++i)
+                    RAM24bit[0xF80000 + i] = dyn_rom[0x80000 + i];
+            } else {
+                // ROM 512KB (Kickstart): vai direto para 0xF80000.
+                omega_host_log("Omega: copying dynamic ROM from SD");
+                size_t copy_size = dyn_size < 0x80000 ? dyn_size : 0x80000;
+                for(size_t i = 0; i < copy_size; ++i)
+                    RAM24bit[0xF80000 + i] = dyn_rom[i];
             }
         }
 #if defined(HAVE_AROS)
@@ -938,9 +947,16 @@ Omega_t* InitRAM(int RAM32bitSize){
         }
 #else
         else {
-            omega_host_log("Omega: copying Kickstart ROM (built-in)");
-            for(int i = 0; i < (int)sizeof(kick12); ++i){
-                RAM24bit[0xF80000 + i] = kick12[i];
+            if(omega_host_kickstart_version() == 13){
+                omega_host_log("Omega: copying Kickstart 1.3 (built-in)");
+                for(int i = 0; i < (int)sizeof(kick13); ++i){
+                    RAM24bit[0xF80000 + i] = kick13[i];
+                }
+            } else {
+                omega_host_log("Omega: copying Kickstart 1.2 (built-in)");
+                for(int i = 0; i < (int)sizeof(kick12); ++i){
+                    RAM24bit[0xF80000 + i] = kick12[i];
+                }
             }
         }
 #endif
