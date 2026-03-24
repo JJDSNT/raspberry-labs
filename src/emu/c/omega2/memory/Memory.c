@@ -926,6 +926,17 @@ Omega_t* InitRAM(int RAM32bitSize){
                     RAM24bit[0xE00000 + i] = dyn_rom[i];
                 for(size_t i = 0; i < 0x80000; ++i)
                     RAM24bit[0xF80000 + i] = dyn_rom[0x80000 + i];
+                // Debug: verify magic longword at each region
+                uint32_t ext_magic  = ((uint32_t)RAM24bit[0xE00000] << 24)
+                                    | ((uint32_t)RAM24bit[0xE00001] << 16)
+                                    | ((uint32_t)RAM24bit[0xE00002] <<  8)
+                                    |  (uint32_t)RAM24bit[0xE00003];
+                uint32_t main_magic = ((uint32_t)RAM24bit[0xF80000] << 24)
+                                    | ((uint32_t)RAM24bit[0xF80001] << 16)
+                                    | ((uint32_t)RAM24bit[0xF80002] <<  8)
+                                    |  (uint32_t)RAM24bit[0xF80003];
+                omega_log_hex("Omega: ext[0xE00000]", ext_magic);
+                omega_log_hex("Omega: main[0xF80000]", main_magic);
             } else {
                 // ROM 512KB (Kickstart): vai direto para 0xF80000.
                 omega_host_log("Omega: copying dynamic ROM from SD");
@@ -934,32 +945,31 @@ Omega_t* InitRAM(int RAM32bitSize){
                     RAM24bit[0xF80000 + i] = dyn_rom[i];
             }
         }
-#if defined(HAVE_AROS)
         else {
-            omega_host_log("Omega: copying AROS ROM");
-            for(int i = 0; i < (int)sizeof(aros_main); ++i){
-                RAM24bit[0xF80000 + i] = aros_main[i];
-            }
-            omega_host_log("Omega: copying AROS Extended ROM");
-            for(int i = 0; i < (int)sizeof(aros_ext); ++i){
-                RAM24bit[0xE00000 + i] = aros_ext[i];
-            }
-        }
-#else
-        else {
-            if(omega_host_kickstart_version() == 13){
+            int kv = omega_host_kickstart_version();
+            if(kv == 13){
                 omega_host_log("Omega: copying Kickstart 1.3 (built-in)");
-                for(int i = 0; i < (int)sizeof(kick13); ++i){
+                for(int i = 0; i < (int)sizeof(kick13); ++i)
                     RAM24bit[0xF80000 + i] = kick13[i];
-                }
-            } else {
+            } else if(kv == 12){
                 omega_host_log("Omega: copying Kickstart 1.2 (built-in)");
-                for(int i = 0; i < (int)sizeof(kick12); ++i){
+                for(int i = 0; i < (int)sizeof(kick12); ++i)
                     RAM24bit[0xF80000 + i] = kick12[i];
-                }
+            } else {
+#if defined(HAVE_AROS)
+                omega_host_log("Omega: copying AROS ROM (built-in)");
+                for(int i = 0; i < (int)sizeof(aros_main); ++i)
+                    RAM24bit[0xF80000 + i] = aros_main[i];
+                omega_host_log("Omega: copying AROS Extended ROM (built-in)");
+                for(int i = 0; i < (int)sizeof(aros_ext); ++i)
+                    RAM24bit[0xE00000 + i] = aros_ext[i];
+#else
+                omega_host_log("Omega: copying Kickstart 1.2 (built-in, default)");
+                for(int i = 0; i < (int)sizeof(kick12); ++i)
+                    RAM24bit[0xF80000 + i] = kick12[i];
+#endif
             }
         }
-#endif
     }
 
 

@@ -1893,7 +1893,6 @@ static void sched_vbl_handler(void) {
     CIAATOD();                                              // CIA-A frame counter
     ChipsetState->WriteWord[0x9C](0x8020);                 // VBL interrupt (INTREQ bit 5)
     probe_emit(EVT_VBL, m68k_get_reg(NULL, M68K_REG_PC), ChipsetState->DMACONR);
-    probe_emit(EVT_CPU_STOP, m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_SP));
     ChipsetState->WriteWord[0x88](0);                      // Copper: restart from COP1LC
     ChipsetState->VBL = 1;                                 // notify host: frame complete
 }

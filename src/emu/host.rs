@@ -12,7 +12,7 @@ static FB_PITCH: AtomicI32      = AtomicI32::new(0);
 
 static ROM_PTR:     AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
 static ROM_SIZE:    AtomicUsize    = AtomicUsize::new(0);
-static KS_VERSION:  AtomicI32      = AtomicI32::new(12); // 12 = KS1.2, 13 = KS1.3
+static KS_VERSION:  AtomicI32      = AtomicI32::new(0); // 0 = default, 12 = KS1.2, 13 = KS1.3
 
 pub fn set_rom(ptr: *const u8, size: usize) {
     ROM_PTR.store(ptr as *mut u8, Ordering::Release);

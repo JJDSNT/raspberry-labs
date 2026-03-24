@@ -1,4 +1,5 @@
 #include "m68kcpu.h"
+#include "../shared/omega_probe.h"
 
 /* ======================================================================== */
 /* ========================= INSTRUCTION HANDLERS ========================= */
@@ -5209,6 +5210,7 @@ void m68k_op_stop(void)
 		uint new_sr = OPER_I_16();
 		m68ki_trace_t0();			   /* auto-disable (see m68kcpu.h) */
 		CPU_STOPPED |= STOP_LEVEL_STOP;
+		probe_emit(EVT_CPU_STOP, REG_PPC, new_sr);
 		m68ki_set_sr(new_sr);
 		if(m68ki_remaining_cycles >= CYC_INSTRUCTION[REG_IR])
 			m68ki_remaining_cycles = CYC_INSTRUCTION[REG_IR];
