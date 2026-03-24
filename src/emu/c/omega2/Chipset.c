@@ -65,10 +65,30 @@ void VHPOSW(uint16_t value){
 }
 
 // 30
+// AROS sends debug messages one character per SERDAT write.
+// Bits 0-7 are the data byte; bit 8 is the stop bit (must be 1 for valid data).
+// Accumulate into a line buffer and flush to omega_host_log on '\n' or full.
+static char serdat_buf[256];
+static int  serdat_pos = 0;
+
 void SERDAT(uint16_t value){
     uint16_t* p = (uint16_t*) &RAM24bit[0xDFF30];
     *p = value;
-    return;
+
+    // Accept any write where the high byte is non-zero (marks a valid serial word).
+    // Some AROS builds use 0x9100|ch (9 stop bits) instead of the minimal 0x0100|ch,
+    // so we no longer require exactly bit 8 — any non-zero high byte is valid.
+    if (value & 0xFF00) {
+        char ch = (char)(value & 0xFF);
+        if (ch != '\0') {
+            serdat_buf[serdat_pos++] = ch;
+        }
+        if (ch == '\n' || ch == '\0' || serdat_pos >= (int)(sizeof(serdat_buf) - 1)) {
+            serdat_buf[serdat_pos] = '\0';
+            if (serdat_pos > 0) omega_host_log(serdat_buf);
+            serdat_pos = 0;
+        }
+    }
 }
 
 // 32
@@ -1896,46 +1916,46 @@ static void sched_vbl_handler(void) {
     ChipsetState->WriteWord[0x88](0);                      // Copper: restart from COP1LC
     ChipsetState->VBL = 1;                                 // notify host: frame complete
 
-    // Debug: AROS boot progress
+    // Runtime monitoring — AROS is running, boot diagnostics no longer needed.
     static uint32_t s_vbl = 0;
-    static uint32_t s_prev_pc = 0;
     s_vbl++;
     uint32_t pc = m68k_get_reg(NULL, M68K_REG_PC);
 
-    // While in the AROS ROM checksum loop (F80112-F8011A), log counter every 20 VBLs
-    if(pc >= 0xF80110 && pc <= 0xF8011E) {
-        if(s_vbl % 20 == 0) {
-            omega_log_hex("AROS chk D0(ctr)", m68k_get_reg(NULL, M68K_REG_D0));
-            omega_log_hex("AROS chk D1(sum)", m68k_get_reg(NULL, M68K_REG_D1));
-        }
-    }
-    // Detect first VBL where CPU has left the checksum range
-    else if(s_prev_pc >= 0xF80110 && s_prev_pc <= 0xF8011E) {
-        omega_log_hex("AROS chk DONE pc", pc);
-        omega_log_hex("AROS chk D1(sum)", m68k_get_reg(NULL, M68K_REG_D1));
-    }
-    // After checksum: one-time register dump at scan function entry (FE9800-FE980E)
-    else if(pc >= 0xFE9800 && pc <= 0xFE980E) {
-        static int s_scan_dumped = 0;
-        if(!s_scan_dumped) {
-            s_scan_dumped = 1;
-            omega_log_hex("SCAN D0(start)", m68k_get_reg(NULL, M68K_REG_D0));
-            omega_log_hex("SCAN D4(end?)",  m68k_get_reg(NULL, M68K_REG_D4));
-            omega_log_hex("SCAN A3(frame)", m68k_get_reg(NULL, M68K_REG_A3));
-            omega_log_hex("SCAN A4(callee)",m68k_get_reg(NULL, M68K_REG_A4));
-            omega_log_hex("SCAN SR",        m68k_get_reg(NULL, M68K_REG_SR));
-            omega_log_hex("SCAN SP",        m68k_get_reg(NULL, M68K_REG_SP));
-        }
-    }
-    // After checksum: log PC + INTENA every 10 VBLs to track boot progress
-    else if(s_vbl % 10 == 0) {
-        omega_log_hex("AROS boot pc",    pc);
-        omega_log_hex("AROS INTENAR",    ChipsetState->INTENAR);
-        omega_log_hex("AROS INTREQR",    ChipsetState->INTREQR);
-        omega_log_hex("AROS DMACONR",    ChipsetState->DMACONR);
+    // Heartbeat: log PC + ExecBase every 500 VBLs (~5s) so we can track progress
+    // without drowning the log.
+    if(s_vbl % 500 == 0) {
+        uint32_t execbase = ((uint32_t)RAM24bit[4] << 24) | ((uint32_t)RAM24bit[5] << 16)
+                          | ((uint32_t)RAM24bit[6] <<  8) | (uint32_t)RAM24bit[7];
+        omega_log_hex("[HB] pc",       pc);
+        omega_log_hex("[HB] ExecBase", execbase);
+        omega_log_hex("[HB] DMACONR",  ChipsetState->DMACONR);
+        omega_log_hex("[HB] INTREQR",  ChipsetState->INTREQR);
     }
 
-    s_prev_pc = pc;
+    // SCAN DONE: detect when PC leaves the RomTag scan range and log the transition.
+    {
+        static int s_was_in_scan = 0;
+        if(pc >= 0xFE9800 && pc <= 0xFE9900) {
+            s_was_in_scan = 1;
+        } else if(s_was_in_scan) {
+            s_was_in_scan = 0;
+            omega_log_hex("[SCAN DONE] pc after", pc);
+            omega_log_hex("[SCAN DONE] D0",       m68k_get_reg(NULL, M68K_REG_D0));
+            omega_log_hex("[SCAN DONE] A2",        m68k_get_reg(NULL, M68K_REG_A2));
+        }
+    }
+
+    // M68K exception detection: if PC lands in the exception vector table
+    // (0x0000-0x03FF) outside of normal exec dispatch, something crashed.
+    if(pc < 0x0400 && pc != 0) {
+        static uint32_t s_last_exc_pc = 0xFFFFFFFF;
+        if(pc != s_last_exc_pc) {
+            s_last_exc_pc = pc;
+            omega_log_hex("[EXCEPTION] vec pc", pc);
+            omega_log_hex("[EXCEPTION] SR",     m68k_get_reg(NULL, M68K_REG_SR));
+            omega_log_hex("[EXCEPTION] SP",     m68k_get_reg(NULL, M68K_REG_SP));
+        }
+    }
 }
 
 uint32_t IncrementVHPOS(void){
