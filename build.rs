@@ -48,28 +48,28 @@ fn main() {
         .file("src/emu/c/omega_input.c")
         .file("src/emu/c/omega_stubs.c")
         // shared
-        .file("src/emu/c/omega2/shared/omega_probe.c")
-        .file("src/emu/c/omega2/shared/os_debug.c")
-        .file("src/emu/c/omega2/shared/emu_debug.c")
+        .file("src/emu/c/omega2/debug/omega_probe.c")
+        .file("src/emu/c/omega2/debug/os_debug.c")
+        .file("src/emu/c/omega2/debug/emu_debug.c")
         .file("src/emu/c/omega2/shared/EventQueue.c")
-        .file("src/emu/c/omega2/agnus/Scheduler.c")
-        .file("src/emu/c/omega2/agnus/Beam.c")
+        .file("src/emu/c/omega2/chipset/agnus/Scheduler.c")
+        .file("src/emu/c/omega2/chipset/agnus/Beam.c")
         // Chipset hub
-        .file("src/emu/c/omega2/Chipset.c")
+        .file("src/emu/c/omega2/chipset/Chipset.c")
         // memory
         .file("src/emu/c/omega2/memory/Memory.c")
         // cia
-        .file("src/emu/c/omega2/cia/CIA.c")
+        .file("src/emu/c/omega2/chipset/cia/CIA.c")
         // agnus
-        .file("src/emu/c/omega2/agnus/DMA.c")
-        .file("src/emu/c/omega2/agnus/Blitter.c")
-        .file("src/emu/c/omega2/agnus/Copper.c")
-        .file("src/emu/c/omega2/agnus/Bitplane.c")
+        .file("src/emu/c/omega2/chipset/agnus/DMA.c")
+        .file("src/emu/c/omega2/chipset/agnus/Blitter.c")
+        .file("src/emu/c/omega2/chipset/agnus/Copper.c")
+        .file("src/emu/c/omega2/chipset/agnus/Bitplane.c")
         // denise
-        .file("src/emu/c/omega2/denise/Denise.c")
+        .file("src/emu/c/omega2/chipset/denise/Denise.c")
         // paula
-        .file("src/emu/c/omega2/paula/Floppy.c")
-        .file("src/emu/c/omega2/paula/Paula.c")
+        .file("src/emu/c/omega2/chipset/paula/Floppy.c")
+        .file("src/emu/c/omega2/chipset/paula/Paula.c")
         // cpu
         .file("src/emu/c/omega2/cpu/m68kcpu.c")
         .file("src/emu/c/omega2/cpu/m68kops.c")
@@ -85,12 +85,14 @@ fn main() {
         .include("src/emu/c")
         .include("src/emu/c/omega2")
         .include("src/emu/c/omega2/shared")
-        .include("src/emu/c/omega2/agnus")
-        .include("src/emu/c/omega2/cia")
+        .include("src/emu/c/omega2/debug")
+        .include("src/emu/c/omega2/chipset")
+        .include("src/emu/c/omega2/chipset/agnus")
+        .include("src/emu/c/omega2/chipset/cia")
         .include("src/emu/c/omega2/cpu")
-        .include("src/emu/c/omega2/denise")
+        .include("src/emu/c/omega2/chipset/denise")
         .include("src/emu/c/omega2/memory")
-        .include("src/emu/c/omega2/paula")
+        .include("src/emu/c/omega2/chipset/paula")
 
         // Flags
         .flag("-ffreestanding")

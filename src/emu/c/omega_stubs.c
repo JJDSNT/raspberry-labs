@@ -29,7 +29,7 @@ void* calloc(size_t n, size_t size)   { (void)n; (void)size; return NULL; }
 // Para STOP (0x4E72 xxxx): emite EVT_CPU_STOP(PC, new_SR) onde new_SR é o imediato.
 #include "omega2/cpu/m68k.h"
 #include "omega2/memory/Memory.h"
-#include "omega2/shared/omega_probe.h"
+#include "omega2/debug/omega_probe.h"
 
 void cpu_instr_callback(void) {
     unsigned int pc = m68k_get_reg(NULL, M68K_REG_PC);

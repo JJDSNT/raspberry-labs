@@ -1,13 +1,3 @@
-//
-//  Memory.c
-//  Omega2
-//
-//  Revised for bare-metal Raspberry Pi 3
-//  Policy:
-//  - external ROM from host/SD has priority
-//  - built-in AROS is fallback only
-//
-
 #include "Memory.h"
 
 #if defined(USE_AROS) && __has_include("aros_main.h")
@@ -31,9 +21,9 @@
 /* Physical memory layout                                                      */
 /* -------------------------------------------------------------------------- */
 
-#define OMEGA_PHYS_ADDR          0x01000000UL   /* 16 MB */
-#define CHIPSTATE_PHYS_ADDR      0x02400000UL   /* 36 MB */
-#define CIASTATE_PHYS_ADDR       0x02410000UL   /* 36 MB + 64 KB */
+#define OMEGA_PHYS_ADDR          0x01000000UL
+#define CHIPSTATE_PHYS_ADDR      0x02400000UL
+#define CIASTATE_PHYS_ADDR       0x02410000UL
 
 /* -------------------------------------------------------------------------- */
 /* Amiga 24-bit address space                                                  */
@@ -98,20 +88,19 @@
 #define ROM_512K_SIZE            0x80000U
 #define ROM_1M_SIZE              0x100000U
 
+typedef enum
+{
+    ACCESS_READ = 0,
+    ACCESS_WRITE = 1
+} MemoryAccessDirection;
+
 /* -------------------------------------------------------------------------- */
 /* Globals                                                                     */
 /* -------------------------------------------------------------------------- */
 
-uint8_t *RAM24bit;
-int diss = 0;
+uint8_t *RAM24bit = (uint8_t *)0;
 
-static uint32_t g_zero_long = 0;
-
-/* -------------------------------------------------------------------------- */
-/* Optional chipset register names                                             */
-/* -------------------------------------------------------------------------- */
-
-char *regNames[] = {
+const char *regNames[] = {
     "BLTDDAT","DMACONR","VPOSR","VHPOSR","DSKDATR","JOY0DAT","JOY1DAT","CLXDAT",
     "ADKCONR","POT0DAT","POT1DAT","POTGOR","SERDATR","DSKBYTR","INTENAR","INTREQR",
     "DSKPTH","DSKPTL","DSKLEN","DSKDAT","REFPTR","VPOSW","VHPOSW","COPCON",
@@ -147,77 +136,56 @@ char *regNames[] = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Generic memory helpers                                                      */
+/* Generic helpers                                                             */
 /* -------------------------------------------------------------------------- */
 
-static inline uint32_t amiga_mask_addr(uint32_t address) {
+static inline uint32_t amiga_mask_addr(uint32_t address)
+{
     return address & AMIGA_ADDR_MASK;
 }
 
-static inline uint8_t mem_read_u8(uint32_t address) {
-    return RAM24bit[address];
-}
-
-static inline uint16_t mem_read_be16(uint32_t address) {
-    return ((uint16_t)RAM24bit[address] << 8)
-         | ((uint16_t)RAM24bit[address + 1]);
-}
-
-static inline uint32_t mem_read_be32(uint32_t address) {
-    return ((uint32_t)RAM24bit[address] << 24)
-         | ((uint32_t)RAM24bit[address + 1] << 16)
-         | ((uint32_t)RAM24bit[address + 2] << 8)
-         |  (uint32_t)RAM24bit[address + 3];
-}
-
-static inline void mem_write_u8(uint32_t address, uint8_t value) {
-    RAM24bit[address] = value;
-}
-
-static inline void mem_write_be16(uint32_t address, uint16_t value) {
-    RAM24bit[address]     = (uint8_t)(value >> 8);
-    RAM24bit[address + 1] = (uint8_t)(value);
-}
-
-static inline void mem_write_be32(uint32_t address, uint32_t value) {
-    RAM24bit[address]     = (uint8_t)(value >> 24);
-    RAM24bit[address + 1] = (uint8_t)(value >> 16);
-    RAM24bit[address + 2] = (uint8_t)(value >> 8);
-    RAM24bit[address + 3] = (uint8_t)(value);
-}
-
-static inline uint32_t mem_read_sized(uint32_t address, enum DataSize size) {
+static inline uint32_t mem_read_sized(uint32_t address, MemoryAccessSize size)
+{
     switch (size) {
-        case m68kByte: return mem_read_u8(address);
-        case m68kWord: return mem_read_be16(address);
-        case m68kLong: return mem_read_be32(address);
+        case MEM_SIZE_BYTE: return mem_read_u8(address);
+        case MEM_SIZE_WORD: return mem_read_u16(address);
+        case MEM_SIZE_LONG: return mem_read_u32(address);
     }
+
     return 0;
 }
 
-static inline void mem_write_sized(uint32_t address, enum DataSize size, uint32_t value) {
+static inline void mem_write_sized(uint32_t address, MemoryAccessSize size, uint32_t value)
+{
     switch (size) {
-        case m68kByte:
+        case MEM_SIZE_BYTE:
             mem_write_u8(address, (uint8_t)value);
             break;
-        case m68kWord:
-            mem_write_be16(address, (uint16_t)value);
+
+        case MEM_SIZE_WORD:
+            mem_write_u16(address, (uint16_t)value);
             break;
-        case m68kLong:
-            mem_write_be32(address, value);
+
+        case MEM_SIZE_LONG:
+            mem_write_u32(address, value);
             break;
     }
 }
 
-static void mem_fill_range(uint32_t start, uint32_t end_inclusive, uint8_t value) {
-    for (uint32_t a = start; a <= end_inclusive; ++a) {
-        RAM24bit[a] = value;
-    }
-}
-
-static void mem_zero_block(uint8_t *ptr, size_t size) {
+static void mem_zero_block(uint8_t *ptr, size_t size)
+{
     for (size_t i = 0; i < size; ++i) {
         ptr[i] = 0;
+    }
+}
+
+static void mem_fill_range(uint32_t start, uint32_t end_inclusive, uint8_t value)
+{
+    uint32_t size = end_inclusive - start + 1;
+    uint8_t *ptr = &RAM24bit[start];
+
+    for (uint32_t i = 0; i < size; ++i) {
+        ptr[i] = value;
     }
 }
 
@@ -225,11 +193,13 @@ static void mem_zero_block(uint8_t *ptr, size_t size) {
 /* Address mapping helpers                                                     */
 /* -------------------------------------------------------------------------- */
 
-static inline uint32_t chip_mirror_to_chipreg(uint32_t address) {
+static inline uint32_t chip_mirror_to_chipreg(uint32_t address)
+{
     return CHIPREG_BASE | (address & CHIPREG_ALIAS_MASK);
 }
 
-static inline int is_dmacon_alias(uint32_t address) {
+static inline int is_dmacon_alias(uint32_t address)
+{
     return (address & CHIPREG_ALIAS_MASK) == DMACON_OFFSET;
 }
 
@@ -237,16 +207,19 @@ static inline int is_dmacon_alias(uint32_t address) {
 /* ROM loading                                                                 */
 /* -------------------------------------------------------------------------- */
 
-static void clear_rom_regions(void) {
+static void clear_rom_regions(void)
+{
     mem_fill_range(EXT_ROM_START, 0xF7FFFFU, 0x00);
     mem_fill_range(AROS_BANK0_START, AROS_BANK1_END, 0x00);
 }
 
-static void log_rom_magic(const char *label, uint32_t address) {
-    omega_log_hex(label, mem_read_be32(address));
+static void log_rom_magic(const char *label, uint32_t address)
+{
+    omega_log_hex(label, mem_read_u32(address));
 }
 
-static void copy_external_rom_image(const uint8_t *rom, size_t size) {
+static void copy_external_rom_image(const uint8_t *rom, size_t size)
+{
     if (rom == NULL || size == 0) {
         return;
     }
@@ -280,7 +253,8 @@ static void copy_external_rom_image(const uint8_t *rom, size_t size) {
     }
 }
 
-static void load_builtin_aros_rom(void) {
+static void load_builtin_aros_rom(void)
+{
 #if defined(HAVE_AROS)
     omega_host_log("Omega: dynamic ROM unavailable, using built-in AROS");
 
@@ -299,7 +273,8 @@ static void load_builtin_aros_rom(void) {
 #endif
 }
 
-static void load_rom_with_fallback(void) {
+static void load_rom_with_fallback(void)
+{
     const uint8_t *dyn_rom = omega_host_rom_ptr();
     const size_t dyn_size = omega_host_rom_size();
 
@@ -316,10 +291,11 @@ static void load_rom_with_fallback(void) {
 /* -------------------------------------------------------------------------- */
 
 static uint32_t handle_chip_ram(uint32_t address,
-                                enum DataSize size,
-                                enum DataDirection direction,
-                                uint32_t value) {
-    if (direction == m68kWrite) {
+                                MemoryAccessSize size,
+                                MemoryAccessDirection direction,
+                                uint32_t value)
+{
+    if (direction == ACCESS_WRITE) {
         mem_write_sized(address, size, value);
         return 0;
     }
@@ -327,18 +303,33 @@ static uint32_t handle_chip_ram(uint32_t address,
     return mem_read_sized(address, size);
 }
 
-static uint32_t handle_zorro2_unmapped(enum DataSize size) {
+static uint32_t handle_zorro2_unmapped(MemoryAccessSize size)
+{
     (void)size;
     return 0;
 }
 
+static uint32_t handle_slow_ram(uint32_t address,
+                                MemoryAccessSize size,
+                                MemoryAccessDirection direction,
+                                uint32_t value)
+{
+    if (direction == ACCESS_WRITE) {
+        mem_write_sized(address, size, value);
+        return 0;
+    }
+
+    return mem_read_sized(address, size);
+}
+
 static uint32_t handle_cia(uint32_t address,
-                           enum DataSize size,
-                           enum DataDirection direction,
-                           uint32_t value) {
+                           MemoryAccessSize size,
+                           MemoryAccessDirection direction,
+                           uint32_t value)
+{
     (void)size;
 
-    if (direction == m68kWrite) {
+    if (direction == ACCESS_WRITE) {
         WriteCIA(address, value);
         return 0;
     }
@@ -347,10 +338,11 @@ static uint32_t handle_cia(uint32_t address,
 }
 
 static uint32_t handle_chip_mirror(uint32_t address,
-                                   enum DataSize size,
-                                   enum DataDirection direction,
-                                   uint32_t value) {
-    if (direction == m68kRead) {
+                                   MemoryAccessSize size,
+                                   MemoryAccessDirection direction,
+                                   uint32_t value)
+{
+    if (direction == ACCESS_READ) {
         return mem_read_sized(chip_mirror_to_chipreg(address), size);
     }
 
@@ -362,59 +354,57 @@ static uint32_t handle_chip_mirror(uint32_t address,
 }
 
 static uint32_t handle_chip_registers(uint32_t address,
-                                      enum DataSize size,
-                                      enum DataDirection direction,
-                                      uint32_t value) {
-    if (direction == m68kRead) {
-        return mem_read_sized(address, size);
+                                      MemoryAccessSize size,
+                                      MemoryAccessDirection direction,
+                                      uint32_t value)
+{
+    if (direction == ACCESS_WRITE) {
+        switch (size) {
+            case MEM_SIZE_BYTE: WriteChipsetByte(address, value); break;
+            case MEM_SIZE_WORD: WriteChipsetWord(address, value); break;
+            case MEM_SIZE_LONG: WriteChipsetLong(address, value); break;
+        }
+        return 0;
     }
 
-    switch (size) {
-        case m68kByte:
-            WriteChipsetByte(address, value);
-            break;
-        case m68kWord:
-            WriteChipsetWord(address, value);
-            break;
-        case m68kLong:
-            WriteChipsetLong(address, value);
-            break;
-    }
-
-    return 0;
+    return mem_read_sized(address, size);
 }
 
-static uint32_t autoconfig_open_bus_value(enum DataSize size) {
+static uint32_t autoconfig_open_bus_value(MemoryAccessSize size)
+{
     switch (size) {
-        case m68kByte: return 0xFFU;
-        case m68kWord: return 0xFFFFU;
-        case m68kLong: return 0xFFFFFFFFU;
+        case MEM_SIZE_BYTE: return 0xFFU;
+        case MEM_SIZE_WORD: return 0xFFFFU;
+        case MEM_SIZE_LONG: return 0xFFFFFFFFU;
     }
+
     return 0xFFFFFFFFU;
 }
 
 static uint32_t handle_rom_space(uint32_t address,
-                                 enum DataSize size,
-                                 enum DataDirection direction) {
+                                 MemoryAccessSize size,
+                                 MemoryAccessDirection direction)
+{
     if (address <= EXT_ROM_END) {
-        return (direction == m68kRead) ? mem_read_sized(address, size) : 0;
+        return (direction == ACCESS_READ) ? mem_read_sized(address, size) : 0;
     }
 
     if (address <= AUTOCONFIG_END) {
         return autoconfig_open_bus_value(size);
     }
 
-    return (direction == m68kRead) ? mem_read_sized(address, size) : 0;
+    return (direction == ACCESS_READ) ? mem_read_sized(address, size) : 0;
 }
 
 /* -------------------------------------------------------------------------- */
-/* Main 24-bit dispatcher                                                      */
+/* Main dispatcher                                                             */
 /* -------------------------------------------------------------------------- */
 
-unsigned int RAM24BitDespatch(uint32_t address,
-                              enum DataSize size,
-                              enum DataDirection direction,
-                              unsigned int value) {
+static uint32_t ram24_dispatch(uint32_t address,
+                               MemoryAccessSize size,
+                               MemoryAccessDirection direction,
+                               uint32_t value)
+{
     address = amiga_mask_addr(address);
 
     if (address <= CHIP_RAM_END) {
@@ -426,7 +416,7 @@ unsigned int RAM24BitDespatch(uint32_t address,
     }
 
     if (address <= SLOW_RAM_END) {
-        return 0;
+        return handle_slow_ram(address, size, direction, value);
     }
 
     if (address <= CIA_END) {
@@ -445,95 +435,25 @@ unsigned int RAM24BitDespatch(uint32_t address,
 }
 
 /* -------------------------------------------------------------------------- */
-/* Legacy experimental/debug dispatcher                                        */
+/* Public memory access                                                        */
 /* -------------------------------------------------------------------------- */
 
-unsigned int RAM24BitDespatchEXP(uint32_t address,
-                                 enum DataSize size,
-                                 enum DataDirection direction,
-                                 unsigned int value) {
-    address = amiga_mask_addr(address);
+uint32_t memory_read(uint32_t address, MemoryAccessSize size)
+{
+    return ram24_dispatch(address, size, ACCESS_READ, 0);
+}
 
-    if (address == 0) {
-        g_zero_long = (value == 0x48454c50U) ? value : 0;
-    }
-
-    if (g_zero_long != 0 && address == 0x100U) {
-        omega_host_log("Error Code at 0x100");
-    }
-
-    if (address <= CHIP_RAM_END) {
-        return handle_chip_ram(address, size, direction, value);
-    }
-
-    if (address < SLOW_RAM_START) {
-        return 0;
-    }
-
-    if (address < CIA_START) {
-        return 0;
-    }
-
-    if (address <= CIA_END) {
-        return handle_cia(address, size, direction, value);
-    }
-
-    if (address < CHIPREG_START) {
-        return handle_chip_mirror(address, size, direction, value);
-    }
-
-    if (address < 0xDA0000U) {
-        omega_host_log("Also Reserved");
-        (void)m68k_get_reg(NULL, M68K_REG_PC);
-        diss = 1;
-        return 0;
-    }
-
-    if (address < 0xDC0000U) {
-        omega_host_log("IDE access");
-        return 0;
-    }
-
-    if (address < 0xDD0000U) {
-        omega_host_log("RTC access");
-        return 0;
-    }
-
-    if (address < 0xDE0000U) {
-        omega_host_log("Reserved access");
-        return 0;
-    }
-
-    if (address < 0xDF0000U) {
-        omega_host_log("Mainboard Resources");
-        return 0;
-    }
-
-    if (address < 0xE00000U) {
-        return handle_chip_registers(address, size, direction, value);
-    }
-
-    if (address < 0xE80000U) {
-        omega_host_log("Reserved!");
-        return 0;
-    }
-
-    if (address < 0xF00000U) {
-        return 0;
-    }
-
-    if (address <= KICK_ROM_END) {
-        return mem_read_sized(address, size);
-    }
-
-    return 0;
+void memory_write(uint32_t address, MemoryAccessSize size, uint32_t value)
+{
+    ram24_dispatch(address, size, ACCESS_WRITE, value);
 }
 
 /* -------------------------------------------------------------------------- */
 /* CIA special read behaviour                                                  */
 /* -------------------------------------------------------------------------- */
 
-static inline unsigned int cia_read_icr_a(void) {
+static inline uint32_t cia_read_icr_a(void)
+{
     uint8_t pending = RAM24bit[CIA_ICR_A_ADDR];
 
     if (pending & CIAState->AICRMask) {
@@ -545,7 +465,8 @@ static inline unsigned int cia_read_icr_a(void) {
     return pending;
 }
 
-static inline unsigned int cia_read_icr_b(void) {
+static inline uint32_t cia_read_icr_b(void)
+{
     uint8_t pending = RAM24bit[CIA_ICR_B_ADDR];
 
     if (pending & CIAState->BICRMask) {
@@ -557,7 +478,8 @@ static inline unsigned int cia_read_icr_b(void) {
     return pending;
 }
 
-static inline unsigned int cia_read_tod_a(uint32_t address) {
+static inline uint32_t cia_read_tod_a(uint32_t address)
+{
     if (address == CIA_ATODH) {
         CIAState->ATODLatch = 1;
         return RAM24bit[address];
@@ -569,10 +491,11 @@ static inline unsigned int cia_read_tod_a(uint32_t address) {
         return value;
     }
 
-    return RAM24BitDespatch(address, m68kByte, m68kRead, 0);
+    return memory_read(address, MEM_SIZE_BYTE);
 }
 
-static inline unsigned int cia_read_tod_b(uint32_t address) {
+static inline uint32_t cia_read_tod_b(uint32_t address)
+{
     if (address == CIA_BTODH) {
         CIAState->BTODLatch = 1;
         return RAM24bit[address];
@@ -584,14 +507,15 @@ static inline unsigned int cia_read_tod_b(uint32_t address) {
         return value;
     }
 
-    return RAM24BitDespatch(address, m68kByte, m68kRead, 0);
+    return memory_read(address, MEM_SIZE_BYTE);
 }
 
 /* -------------------------------------------------------------------------- */
 /* Musashi callbacks                                                           */
 /* -------------------------------------------------------------------------- */
 
-unsigned int cpu_read_byte(unsigned int address) {
+uint32_t cpu_read_byte(uint32_t address)
+{
     address = amiga_mask_addr(address);
 
     if (address == CIA_ICR_A_ADDR) {
@@ -610,43 +534,52 @@ unsigned int cpu_read_byte(unsigned int address) {
         return cia_read_tod_b(address);
     }
 
-    return RAM24BitDespatch(address, m68kByte, m68kRead, 0);
+    return memory_read(address, MEM_SIZE_BYTE);
 }
 
-unsigned int cpu_read_word(unsigned int address) {
-    return RAM24BitDespatch(address, m68kWord, m68kRead, 0);
+uint32_t cpu_read_word(uint32_t address)
+{
+    return memory_read(address, MEM_SIZE_WORD);
 }
 
-unsigned int cpu_read_long(unsigned int address) {
-    return RAM24BitDespatch(address, m68kLong, m68kRead, 0);
+uint32_t cpu_read_long(uint32_t address)
+{
+    return memory_read(address, MEM_SIZE_LONG);
 }
 
-void cpu_write_byte(unsigned int address, unsigned int value) {
-    (void)RAM24BitDespatch(address, m68kByte, m68kWrite, value);
+void cpu_write_byte(uint32_t address, uint32_t value)
+{
+    memory_write(address, MEM_SIZE_BYTE, value);
 }
 
-void cpu_write_word(unsigned int address, unsigned int value) {
-    (void)RAM24BitDespatch(address, m68kWord, m68kWrite, value);
+void cpu_write_word(uint32_t address, uint32_t value)
+{
+    memory_write(address, MEM_SIZE_WORD, value);
 }
 
-void cpu_write_long(unsigned int address, unsigned int value) {
-    (void)RAM24BitDespatch(address, m68kLong, m68kWrite, value);
+void cpu_write_long(uint32_t address, uint32_t value)
+{
+    memory_write(address, MEM_SIZE_LONG, value);
 }
 
-void cpu_set_fc(unsigned int fc) {
+void cpu_set_fc(uint32_t fc)
+{
     (void)fc;
 }
 
-int cpu_irq_ack(int level) {
+int cpu_irq_ack(int level)
+{
     probe_emit(EVT_INTR_ACK, (uint32_t)level, M68K_INT_ACK_AUTOVECTOR);
     return M68K_INT_ACK_AUTOVECTOR;
 }
 
-unsigned int cpu_read_word_dasm(unsigned int address) {
+uint32_t cpu_read_word_dasm(uint32_t address)
+{
     return cpu_read_word(address);
 }
 
-unsigned int cpu_read_long_dasm(unsigned int address) {
+uint32_t cpu_read_long_dasm(uint32_t address)
+{
     return cpu_read_long(address);
 }
 
@@ -654,7 +587,8 @@ unsigned int cpu_read_long_dasm(unsigned int address) {
 /* CPU reset                                                                   */
 /* -------------------------------------------------------------------------- */
 
-static void cpu_clear_core_registers(void) {
+static void cpu_clear_core_registers(void)
+{
     m68k_set_reg(M68K_REG_PC, 4);
 
     m68k_set_reg(M68K_REG_D0, 0);
@@ -676,40 +610,45 @@ static void cpu_clear_core_registers(void) {
     m68k_set_reg(M68K_REG_A7, 0);
 }
 
-void cpu_pulse_reset(void) {
+void cpu_pulse_reset(void)
+{
     cpu_clear_core_registers();
 
-    /* Vector 0 (SP) intentionally zero here; ROM sets proper initial stack. */
-    mem_write_be32(0, 0x00000000U);
-    mem_write_be32(4, KICK_ROM_BOOT_PC);
+    mem_write_u32(0, 0x00000000U);
+    mem_write_u32(4, KICK_ROM_BOOT_PC);
 
     FloppyReset();
 }
 
 /* -------------------------------------------------------------------------- */
-/* Memory / state initialisation                                               */
+/* Initialization                                                              */
 /* -------------------------------------------------------------------------- */
 
-static void init_amiga_address_space(void) {
-    mem_zero_block(RAM24bit, sizeof(Omega_t));
+static void init_amiga_address_space(void)
+{
+    mem_zero_block(RAM24bit, sizeof(MemoryMap));
 }
 
-static void init_external_state_buffers(void) {
+static void init_external_state_buffers(void)
+{
     uint8_t *chipstate_buf = (uint8_t *)CHIPSTATE_PHYS_ADDR;
     uint8_t *ciastate_buf  = (uint8_t *)CIASTATE_PHYS_ADDR;
+    MemoryMap *map         = (MemoryMap *)RAM24bit;
 
     mem_zero_block(chipstate_buf, CHIPSTATE_SIZE);
     mem_zero_block(ciastate_buf, CIASTATE_SIZE);
 
-    InitChipset(((Omega_t *)RAM24bit)->chipRAM, chipstate_buf);
+    InitChipset(map->chip_ram, chipstate_buf);
     InitCIA(chipstate_buf, ciastate_buf);
 }
 
-static void init_aros_custom_banks(void) {
+static void init_aros_custom_banks(void)
+{
     mem_fill_range(AROS_BANK0_START, AROS_BANK1_END, 0x00);
 }
 
-static void init_chip_ram_pattern(void) {
+static void init_chip_ram_pattern(void)
+{
 #if defined(CHIPSET_ECS)
     for (uint32_t i = 0; i < 0x100000U; ++i) {
         RAM24bit[i] = 0x00;
@@ -718,13 +657,15 @@ static void init_chip_ram_pattern(void) {
     for (uint32_t i = 0; i < 0x040000U; ++i) {
         RAM24bit[i] = 0xFF;
     }
+
     for (uint32_t i = 0x040000U; i < 0x200000U; ++i) {
         RAM24bit[i] = 0x84;
     }
 #endif
 }
 
-static void init_rtc_stub(void) {
+static void init_rtc_stub(void)
+{
     RAM24bit[RTC_BASE + 0x0] = 0x00;
     RAM24bit[RTC_BASE + 0x1] = 0xFF;
     RAM24bit[RTC_BASE + 0x2] = 0xFF;
@@ -744,11 +685,12 @@ static void init_rtc_stub(void) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Public init                                                                 */
+/* Public init/reset                                                           */
 /* -------------------------------------------------------------------------- */
 
-Omega_t *InitRAM(int RAM32bitSize) {
-    (void)RAM32bitSize;
+MemoryMap *memory_init(uint32_t fast_ram_size)
+{
+    (void)fast_ram_size;
 
     RAM24bit = (uint8_t *)OMEGA_PHYS_ADDR;
 
@@ -761,23 +703,19 @@ Omega_t *InitRAM(int RAM32bitSize) {
     cpu_pulse_reset();
     init_rtc_stub();
 
-    return (Omega_t *)RAM24bit;
+    return (MemoryMap *)RAM24bit;
+}
+
+void memory_reset(void)
+{
+    cpu_pulse_reset();
 }
 
 /* -------------------------------------------------------------------------- */
-/* Disassembler helper                                                         */
+/* Diagnostics                                                                 */
 /* -------------------------------------------------------------------------- */
 
-void make_hex(char *buff, unsigned int pc, unsigned int length) {
-    char *ptr = buff;
-
-    for (; length > 0; length -= 2) {
-        sprintf(ptr, "%04x", cpu_read_word_dasm(pc));
-        pc += 2;
-        ptr += 4;
-
-        if (length > 2) {
-            *ptr++ = ' ';
-        }
-    }
+void printCPUContext(void)
+{
+    /* stub for now */
 }

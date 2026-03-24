@@ -9,7 +9,7 @@
 #define Floppy_h
 
 #include <stdio.h>
-#include "Chipset.h"
+#include "omega2/chipset/Chipset.h"
 
 void FloppyInit(void);
 void FloppyReset(void);
