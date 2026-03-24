@@ -392,39 +392,40 @@ void ADFTrack2MFMTrack(uint8_t* adfTrack,int cylinder, int side, uint32_t addres
         encodeBlock(&lowlevelSector[32], &buffer[s+64], 512);
         
         
-        //Header checksum
-        uint8_t hcheck[4] = { 0, 0, 0, 0 };
-        for(unsigned i = 8; i < 48; i += 4) {
-            hcheck[0] ^= buffer[s+i];
-            hcheck[1] ^= buffer[s+i+1];
-            hcheck[2] ^= buffer[s+i+2];
-            hcheck[3] ^= buffer[s+i+3];
+        // Header checksum: XOR of raw (decoded) info + label longwords.
+        // Covers lowlevelSector[4..23] = 4 bytes info + 16 bytes label = 5 longwords.
+        // KS1.x decodes both the data and the stored checksum then compares; the
+        // checksum must therefore be the XOR of the *un-encoded* source bytes.
+        {
+            uint32_t hcheck32 = 0;
+            for (int j = 0; j < 20; j += 4) {
+                hcheck32 ^= ((uint32_t)lowlevelSector[4+j]   << 24)
+                          |  ((uint32_t)lowlevelSector[4+j+1] << 16)
+                          |  ((uint32_t)lowlevelSector[4+j+2] <<  8)
+                          |   (uint32_t)lowlevelSector[4+j+3];
+            }
+            lowlevelSector[24] = (uint8_t)(hcheck32 >> 24);
+            lowlevelSector[25] = (uint8_t)(hcheck32 >> 16);
+            lowlevelSector[26] = (uint8_t)(hcheck32 >>  8);
+            lowlevelSector[27] = (uint8_t) hcheck32;
         }
-        
-        lowlevelSector[24] = hcheck[0];
-        lowlevelSector[25] = hcheck[1];
-        lowlevelSector[26] = hcheck[2];
-        lowlevelSector[27] = hcheck[3];
-        
-        //header checksum
         encodeBlock(&lowlevelSector[24], &buffer[s+48], 4); //adds 8 bytes
-        
-        
-        // Data checksum
-        uint8_t dcheck[4] = { 0, 0, 0, 0 };
-        for(unsigned i = 64; i < 1088; i += 4) {
-            dcheck[0] ^= buffer[s+i];
-            dcheck[1] ^= buffer[s+i+1];
-            dcheck[2] ^= buffer[s+i+2];
-            dcheck[3] ^= buffer[s+i+3];
+
+        // Data checksum: XOR of raw ADF sector data longwords (512 bytes = 128 longs).
+        // Same rationale: must be computed before odd/even encoding.
+        {
+            uint32_t dcheck32 = 0;
+            for (int j = 0; j < 512; j += 4) {
+                dcheck32 ^= ((uint32_t)lowlevelSector[32+j]   << 24)
+                          |  ((uint32_t)lowlevelSector[32+j+1] << 16)
+                          |  ((uint32_t)lowlevelSector[32+j+2] <<  8)
+                          |   (uint32_t)lowlevelSector[32+j+3];
+            }
+            lowlevelSector[28] = (uint8_t)(dcheck32 >> 24);
+            lowlevelSector[29] = (uint8_t)(dcheck32 >> 16);
+            lowlevelSector[30] = (uint8_t)(dcheck32 >>  8);
+            lowlevelSector[31] = (uint8_t) dcheck32;
         }
-        
-        lowlevelSector[28] = dcheck[0];
-        lowlevelSector[29] = dcheck[1];
-        lowlevelSector[30] = dcheck[2];
-        lowlevelSector[31] = dcheck[3];
-        
-        //Encode Data checksum
         encodeBlock(&lowlevelSector[28], &buffer[s+56], 4); //adds 8 bytes
         
         
