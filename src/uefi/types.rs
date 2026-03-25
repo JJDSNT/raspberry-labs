@@ -66,10 +66,26 @@ impl EfiGuid {
         d4: [0x99, 0x2e, 0xe5, 0xbb, 0xcf, 0x20, 0xe3, 0x94],
     };
 
+    pub const LOADED_IMAGE_PROTOCOL: Self = Self {
+        d1: 0x5B1B31A1, d2: 0x9562, d3: 0x11d2,
+        d4: [0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+    };
+    pub const SIMPLE_FILE_SYSTEM_PROTOCOL: Self = Self {
+        d1: 0x964E5B22, d2: 0x6459, d3: 0x11d2,
+        d4: [0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+    };
+    pub const FILE_INFO: Self = Self {
+        d1: 0x09576E92, d2: 0x6D3F, d3: 0x11D2,
+        d4: [0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+    };
+
     pub fn known_name(&self) -> Option<&'static str> {
-        if *self == Self::DEVICE_TREE  { Some("FDT (Device Tree Blob)") }
-        else if *self == Self::ACPI_20 { Some("ACPI 2.0") }
-        else if *self == Self::SMBIOS3 { Some("SMBIOS 3") }
+        if *self == Self::DEVICE_TREE                  { Some("FDT (Device Tree Blob)") }
+        else if *self == Self::ACPI_20                 { Some("ACPI 2.0") }
+        else if *self == Self::SMBIOS3                 { Some("SMBIOS 3") }
+        else if *self == Self::LOADED_IMAGE_PROTOCOL   { Some("LoadedImageProtocol") }
+        else if *self == Self::SIMPLE_FILE_SYSTEM_PROTOCOL { Some("SimpleFileSystemProtocol") }
+        else if *self == Self::FILE_INFO               { Some("FileInfo") }
         else { None }
     }
 }
@@ -154,6 +170,15 @@ impl EfiMemoryDescriptor {
 // Tipo de pool para AllocatePool
 pub const EFI_LOADER_DATA: u32 = 2;
 
+// ─── Constantes para AllocatePages / File ─────────────────────────────────────
+
+/// AllocatePages: AllocateAddress — aloca em endereço físico específico.
+pub const ALLOCATE_ADDRESS: u32 = 2;
+/// Tipo de memória EfiLoaderData para AllocatePages/AllocatePool.
+pub const EFI_LOADER_DATA_TYPE: u32 = 2;
+/// OpenMode: read-only.
+pub const FILE_MODE_READ: u64 = 0x0000000000000001;
+
 // ─── Boot Services ───────────────────────────────────────────────────────────
 //
 // Layout segundo UEFI 2.10 Tabela 7.1 — AArch64 LP64 (ponteiros = 8 bytes).
@@ -180,7 +205,15 @@ pub struct EfiBootServices {
     pub hdr: EfiTableHeader,                           // 0x00  24 bytes
 
     _tpl:        [EfiFnPtr; 2],                        // 0x18, 0x20
-    _page_alloc: [EfiFnPtr; 2],                        // 0x28, 0x30
+
+    pub allocate_pages: unsafe extern "efiapi" fn(     // 0x28
+        allocate_type: u32,
+        memory_type:   u32,
+        pages:         usize,
+        memory:        *mut u64,
+    ) -> EfiStatus,
+
+    _free_pages: EfiFnPtr,                             // 0x30
 
     pub get_memory_map: unsafe extern "efiapi" fn(     // 0x38
         memory_map_size: *mut usize,
@@ -198,8 +231,17 @@ pub struct EfiBootServices {
 
     _free_pool:  EfiFnPtr,                             // 0x48
     _events:     [EfiFnPtr; 6],                        // 0x50–0x78
-    _protocols:  [EfiFnPtr; 9],                        // 0x80–0xC0
-    _image_svc:  [EfiFnPtr; 3],                        // 0xC8–0xD8
+
+    _proto_pre:  [EfiFnPtr; 3],                        // 0x80, 0x88, 0x90
+
+    pub handle_protocol: unsafe extern "efiapi" fn(    // 0x98
+        handle:    EfiHandle,
+        protocol:  *const EfiGuid,
+        interface: *mut *mut c_void,
+    ) -> EfiStatus,
+
+    _proto_post: [EfiFnPtr; 5],                        // 0xA0, 0xA8, 0xB0, 0xB8, 0xC0
+    _image_svc:  [EfiFnPtr; 3],                        // 0xC8, 0xD0, 0xD8
     _unload:     EfiFnPtr,                             // 0xE0
 
     pub exit_boot_services: unsafe extern "efiapi" fn( // 0xE8
@@ -252,4 +294,82 @@ pub struct EfiSystemTable {
     pub boot_services:      *mut EfiBootServices,    // 0x60
     pub n_tables:           usize,                   // 0x68
     pub config_table:       *mut EfiConfigTable,     // 0x70
+}
+
+// ─── EFI_LOADED_IMAGE_PROTOCOL ───────────────────────────────────────────────
+
+/// EFI_LOADED_IMAGE_PROTOCOL — apenas os campos usados (até device_handle).
+#[repr(C)]
+pub struct EfiLoadedImageProtocol {
+    pub revision:      u32,
+    _pad:              u32,
+    _parent_handle:    EfiHandle,               // 0x08
+    _system_table:     *mut EfiSystemTable,     // 0x10
+    pub device_handle: EfiHandle,               // 0x18
+    // restante omitido — não necessário
+}
+
+// ─── EFI_SIMPLE_FILE_SYSTEM_PROTOCOL ─────────────────────────────────────────
+
+#[repr(C)]
+pub struct EfiSimpleFileSystemProtocol {
+    pub revision: u64,
+    pub open_volume: unsafe extern "efiapi" fn(
+        this: *mut EfiSimpleFileSystemProtocol,
+        root: *mut *mut EfiFileProtocol,
+    ) -> EfiStatus,
+}
+
+// ─── EFI_FILE_PROTOCOL ───────────────────────────────────────────────────────
+
+#[repr(C)]
+pub struct EfiFileProtocol {
+    pub revision:     u64,                                  // 0x00
+    pub open: unsafe extern "efiapi" fn(                    // 0x08
+        this:       *mut EfiFileProtocol,
+        new_handle: *mut *mut EfiFileProtocol,
+        file_name:  *const u16,
+        open_mode:  u64,
+        attributes: u64,
+    ) -> EfiStatus,
+    pub close: unsafe extern "efiapi" fn(                   // 0x10
+        this: *mut EfiFileProtocol,
+    ) -> EfiStatus,
+    _delete:          EfiFnPtr,                             // 0x18
+    pub read: unsafe extern "efiapi" fn(                    // 0x20
+        this:        *mut EfiFileProtocol,
+        buffer_size: *mut usize,
+        buffer:      *mut u8,
+    ) -> EfiStatus,
+    _write:           EfiFnPtr,                             // 0x28
+    _get_position:    EfiFnPtr,                             // 0x30
+    pub set_position: unsafe extern "efiapi" fn(            // 0x38
+        this:     *mut EfiFileProtocol,
+        position: u64,
+    ) -> EfiStatus,
+    pub get_info: unsafe extern "efiapi" fn(                // 0x40
+        this:             *mut EfiFileProtocol,
+        information_type: *const EfiGuid,
+        buffer_size:      *mut usize,
+        buffer:           *mut u8,
+    ) -> EfiStatus,
+}
+
+// ─── EFI_FILE_INFO ────────────────────────────────────────────────────────────
+
+/// Buffer para EFI_FILE_INFO — campo FileName limitado a 64 caracteres UTF-16.
+#[repr(C)]
+pub struct EfiFileInfo {
+    pub struct_size:   u64,
+    pub file_size:     u64,
+    pub physical_size: u64,
+    _times:            [u8; 48],    // 3 × EFI_TIME (16 bytes cada)
+    pub attribute:     u64,
+    _file_name:        [u16; 64],   // até 64 chars
+}
+
+impl EfiFileInfo {
+    pub fn zeroed() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
 }

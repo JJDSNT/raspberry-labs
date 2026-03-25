@@ -33,6 +33,10 @@ pub fn run(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> ! {
     // Procura DTB na tabela de configuração antes de sair dos boot services.
     let dtb_ptr = unsafe { find_dtb(st) };
 
+    // Tenta carregar kernel8-be.img para boot UEFI+BE.
+    // Deve ocorrer ANTES de ExitBootServices (precisa do File System Protocol).
+    let be_kernel_size = unsafe { try_load_be_kernel(image_handle, st) };
+
     // Última sequência com boot services: GetMemoryMap → ExitBootServices.
     // Nenhuma chamada UEFI pode ocorrer entre GetMemoryMap e ExitBootServices.
     let map_key = unsafe { get_memory_map_key(st) };
@@ -56,6 +60,13 @@ pub fn run(image_handle: EfiHandle, system_table: *mut EfiSystemTable) -> ! {
 
     crate::log!("UEFI", "boot services exited — bare-metal a partir daqui");
     crate::log!("UEFI", "dtb @ {:?}", dtb_ptr);
+
+    // ── Modo UEFI+BE: kernel BE carregado → flush + switch + jump ────────────
+    if let Some(size) = be_kernel_size {
+        crate::log!("UEFI", "BE: kernel8-be.img ({} bytes) @ 0x80000", size);
+        crate::log!("UEFI", "BE: flush cache → EE=1 → jump...");
+        unsafe { crate::uefi::be_jump::switch_be_and_jump(0x80000, 0x80000, size); }
+    }
 
     // Constrói BootInfo a partir do DTB encontrado na config table UEFI.
     let mut info = BootInfo::default_with_dtb(dtb_ptr.unwrap_or(0));
@@ -236,6 +247,125 @@ fn log_memory_map(buf: &[u8], map_size: usize, desc_size: usize) {
     if n_entries > max_shown {
         crate::log!("UEFI", "  ... ({} entries omitted)", n_entries - max_shown);
     }
+}
+
+// ─── Loader do kernel BE ─────────────────────────────────────────────────────
+
+/// Tenta carregar kernel8-be.img em 0x80000 via EFI Simple File System.
+///
+/// Retorna Some(size) se o arquivo foi encontrado e carregado com sucesso.
+/// Retorna None silenciosamente se o arquivo não existe (boot LE normal).
+/// Loga erros inesperados mas não faz panic.
+///
+/// Deve ser chamada ANTES de ExitBootServices.
+unsafe fn try_load_be_kernel(
+    image_handle: EfiHandle,
+    st: &EfiSystemTable,
+) -> Option<usize> {
+    use core::ffi::c_void;
+    let bs = &*st.boot_services;
+
+    // 1. LoadedImageProtocol → device_handle do volume de boot
+    let mut loaded_img: *mut EfiLoadedImageProtocol = core::ptr::null_mut();
+    let s = (bs.handle_protocol)(
+        image_handle,
+        &EfiGuid::LOADED_IMAGE_PROTOCOL,
+        &mut loaded_img as *mut *mut EfiLoadedImageProtocol as *mut *mut c_void,
+    );
+    if !s.is_success() {
+        crate::log!("UEFI", "BE: LoadedImageProtocol: {:?} — skip", s);
+        return None;
+    }
+
+    let dev = (*loaded_img).device_handle;
+
+    // 2. SimpleFileSystemProtocol no device
+    let mut fs: *mut EfiSimpleFileSystemProtocol = core::ptr::null_mut();
+    let s = (bs.handle_protocol)(
+        dev,
+        &EfiGuid::SIMPLE_FILE_SYSTEM_PROTOCOL,
+        &mut fs as *mut *mut EfiSimpleFileSystemProtocol as *mut *mut c_void,
+    );
+    if !s.is_success() {
+        crate::log!("UEFI", "BE: SimpleFileSystem: {:?} — skip", s);
+        return None;
+    }
+
+    // 3. Abrir volume raiz
+    let mut root: *mut EfiFileProtocol = core::ptr::null_mut();
+    let s = ((*fs).open_volume)(fs, &mut root);
+    if !s.is_success() {
+        crate::log!("UEFI", "BE: open_volume: {:?}", s);
+        return None;
+    }
+
+    // 4. Abrir "kernel8-be.img" (UTF-16LE)
+    const FNAME: &[u16] = &[
+        b'k' as u16, b'e' as u16, b'r' as u16, b'n' as u16,
+        b'e' as u16, b'l' as u16, b'8' as u16, b'-' as u16,
+        b'b' as u16, b'e' as u16, b'.' as u16,
+        b'i' as u16, b'm' as u16, b'g' as u16, 0u16,
+    ];
+
+    let mut file: *mut EfiFileProtocol = core::ptr::null_mut();
+    let s = ((*root).open)(root, &mut file, FNAME.as_ptr(), FILE_MODE_READ, 0);
+    if !s.is_success() {
+        // Arquivo ausente = boot LE normal; não é erro.
+        crate::log!("UEFI", "BE: kernel8-be.img nao encontrado — boot LE");
+        let _ = ((*root).close)(root);
+        return None;
+    }
+
+    crate::log!("UEFI", "BE: kernel8-be.img encontrado — carregando...");
+
+    // 5. GetInfo → tamanho do arquivo
+    let mut info = EfiFileInfo::zeroed();
+    let mut info_sz = core::mem::size_of::<EfiFileInfo>();
+    let s = ((*file).get_info)(
+        file,
+        &EfiGuid::FILE_INFO,
+        &mut info_sz,
+        &mut info as *mut EfiFileInfo as *mut u8,
+    );
+    if !s.is_success() {
+        crate::log!("UEFI", "BE: GetInfo: {:?}", s);
+        let _ = ((*file).close)(file);
+        let _ = ((*root).close)(root);
+        return None;
+    }
+
+    let file_size = info.file_size as usize;
+    crate::log!("UEFI", "BE: tamanho = {} bytes ({} KiB)", file_size, file_size / 1024);
+
+    // 6. AllocatePages em 0x80000 (mesmo endereço do boot bare-metal)
+    const KERNEL_PHYS: u64 = 0x80000;
+    let pages = (file_size + 4095) / 4096;
+    let mut addr: u64 = KERNEL_PHYS;
+    let s = (bs.allocate_pages)(ALLOCATE_ADDRESS, EFI_LOADER_DATA_TYPE, pages, &mut addr);
+    if !s.is_success() {
+        crate::log!("UEFI", "BE: AllocatePages @ {:#x}: {:?}", KERNEL_PHYS, s);
+        let _ = ((*file).close)(file);
+        let _ = ((*root).close)(root);
+        return None;
+    }
+
+    // 7. Posicionar no início + ler
+    let _ = ((*file).set_position)(file, 0);
+
+    let dest = KERNEL_PHYS as *mut u8;
+    let mut read_sz = file_size;
+    let s = ((*file).read)(file, &mut read_sz, dest);
+
+    let _ = ((*file).close)(file);
+    let _ = ((*root).close)(root);
+
+    if !s.is_success() || read_sz != file_size {
+        crate::log!("UEFI", "BE: Read: {:?} ({}/{} bytes)", s, read_sz, file_size);
+        return None;
+    }
+
+    crate::log!("UEFI", "BE: carregado em {:#x} — {} bytes OK", KERNEL_PHYS, read_sz);
+    Some(read_sz)
 }
 
 // ─── Utilitário: UTF-16 → UART ───────────────────────────────────────────────
