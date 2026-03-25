@@ -2,15 +2,16 @@ TARGET_LE   = aarch64-unknown-none-softfloat
 TARGET_BE   = aarch64_be-unknown-none-softfloat.json
 TARGET_UEFI = aarch64-unknown-uefi
 
-KERNEL_LE = kernel8.img
-KERNEL_BE = kernel8-be.img
-EFI_OUT   = BOOTAA64.EFI
+OUT_DIR   = out
+KERNEL_LE = $(OUT_DIR)/kernel8.img
+KERNEL_BE = $(OUT_DIR)/kernel8-be.img
+EFI_OUT   = $(OUT_DIR)/BOOTAA64.EFI
 
 AROS_MAIN = src/emu/c/omega2/memory/aros_main.h
 AROS_EXT  = src/emu/c/omega2/memory/aros_ext.h
 GEN_ROM   = python3 src/emu/rom/gen_rom.py
 
-.PHONY: le be aros uefi clean
+.PHONY: le be aros uefi sdcard sdcard-be sdcard-uefi sdcard-uefi-be clean
 
 # Build with AROS ROM (generates headers from src/arosrom/ if needed)
 # KS1.2 / KS1.3 are selected at boot time via the launcher TUI — no make target needed.
@@ -21,11 +22,13 @@ _gen_aros:
 	@echo "[ROM] AROS headers generated"
 
 le:
+	@mkdir -p $(OUT_DIR)
 	cargo build --release --target $(TARGET_LE)
 	cargo objcopy --release --target $(TARGET_LE) -- -O binary $(KERNEL_LE)
 	@echo "[OK] $(KERNEL_LE) pronto"
 
 be:
+	@mkdir -p $(OUT_DIR)
 	cargo +nightly build --release \
 		--target $(TARGET_BE) \
 		-Z build-std=core,compiler_builtins
@@ -36,6 +39,7 @@ be:
 	@echo "[OK] $(KERNEL_BE) pronto"
 
 uefi:
+	@mkdir -p $(OUT_DIR)
 	cargo +nightly build --release \
 		--target $(TARGET_UEFI) \
 		-Z build-std=core,compiler_builtins
@@ -43,6 +47,18 @@ uefi:
 	@echo "[OK] $(EFI_OUT) pronto"
 	@echo "[>>] Copie para EFI/BOOT/$(EFI_OUT) no cartão SD junto com RPI_EFI.fd"
 
+sdcard:
+	./run.sh -s
+
+sdcard-be:
+	./run.sh -b -s
+
+sdcard-uefi:
+	./run.sh -u
+
+sdcard-uefi-be:
+	./run.sh -u -b
+
 clean:
 	cargo clean
-	rm -f $(KERNEL_LE) $(KERNEL_BE) $(EFI_OUT)
+	rm -rf $(OUT_DIR)

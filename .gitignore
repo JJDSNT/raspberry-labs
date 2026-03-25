@@ -1,11 +1,13 @@
 /target
+
+# Artefatos gerados (canonical: out/)
+out/
+# Safety net para builds manuais na raiz
 kernel8.img
 kernel8-be.img
 BOOTAA64.EFI
-
-# SD card images (generated)
-sd.img
 sdcard.img
+sd.img
 
 # Disk images (não versionados)
 disks/
