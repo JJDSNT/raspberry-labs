@@ -98,6 +98,7 @@ pub fn kernel_main(info: &BootInfo) -> ! {
 
     // Periféricos de armazenamento e I/O
     crate::platform::raspi3::emmc::init();
+    #[cfg(not(target_os = "uefi"))]
     crate::drivers::usb::init();
 
     crate::kernel::scheduler::spawn("boot", boot_task)

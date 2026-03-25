@@ -64,7 +64,10 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
         DemoKind::Parallax      => run_renderer_demo(fb, parallax::ParallaxDemo::new()),
         DemoKind::Juggler       => run_renderer_demo(fb, juggler::JugglerDemo::new()),
         DemoKind::SpriteBouncer => run_renderer_demo(fb, sprite_bouncer::SpriteBouncerDemo::new()),
+        #[cfg(not(target_os = "uefi"))]
         DemoKind::Omega         => crate::emu::run(fb),
+        #[cfg(target_os = "uefi")]
+        DemoKind::Omega         => loop { core::hint::spin_loop(); },
     }
 }
 

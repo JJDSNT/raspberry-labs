@@ -7,6 +7,14 @@ fn main() {
     println!("cargo:rerun-if-changed=src/usb/dwc2_raspi3.h");
     println!("cargo:rerun-if-changed=src/emu");
 
+    // Para o target UEFI (aarch64-unknown-uefi) não compilamos código C:
+    //   - TinyUSB e Omega2 são subsistemas bare-metal, não usados via UEFI
+    //   - O linker LLD do target UEFI não aceita os link-args de whole-archive
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "uefi" {
+        return;
+    }
+
     // Substitui dwc2_bcm.h da biblioteca pelo nosso header para Pi 3 em tempo de build.
     // O submodule lib/tinyusb não é modificado no git — apenas o arquivo em disco
     // é sobrescrito durante a compilação.

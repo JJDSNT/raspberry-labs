@@ -33,7 +33,8 @@ pub fn dispatch_pending_irqs(ctx: &mut ExceptionContext) {
 }
 
 fn dispatch_vic_irqs() {
-    // USB HCD (DWC2) — IRQ 9
+    // USB HCD (DWC2) — IRQ 9. Não disponível no path UEFI (sem TinyUSB).
+    #[cfg(not(target_os = "uefi"))]
     if interrupts::vic_usb_irq_pending() {
         crate::drivers::usb::handle_irq();
         return;

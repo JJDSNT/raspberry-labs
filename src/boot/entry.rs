@@ -8,6 +8,11 @@ use crate::platform::raspi3::dtb::Fdt;
 
 static mut BOOT_INFO: Option<BootInfo> = None;
 
+/// Armazena o BootInfo construído pelo caminho UEFI antes de chamar kernel_main.
+pub fn set_boot_info(info: BootInfo) {
+    unsafe { BOOT_INFO = Some(info); }
+}
+
 #[no_mangle]
 pub extern "C" fn rust_entry(dtb_ptr: usize) -> ! {
     let mut info = BootInfo::default_with_dtb(dtb_ptr);
@@ -33,7 +38,7 @@ pub extern "C" fn rust_entry(dtb_ptr: usize) -> ! {
     crate::kernel::main::kernel_main(boot_info())
 }
 
-fn early_arch_init() {
+pub fn early_arch_init() {
     crate::log!("BOOT", "early_arch_init: exceptions");
     crate::arch::aarch64::exception::init();
 
@@ -50,6 +55,10 @@ fn early_arch_init() {
         "CurrentEL={}",
         crate::arch::aarch64::exception::current_el()
     );
+    // Para UEFI: a MMU já está activa com o mapeamento do firmware.
+    // Os símbolos __mmu_start/__mmu_end são do linker.ld bare-metal e não
+    // existem no PE32+. Retomamos controlo do MMU após estabilização.
+    #[cfg(not(target_os = "uefi"))]
     crate::arch::aarch64::mmu::init();
     crate::log!("BOOT", "early_arch_init: local irq route");
     crate::platform::raspi3::interrupts::init_core0_timer_irq();
