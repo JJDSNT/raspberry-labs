@@ -1,6 +1,7 @@
 /target
 kernel8.img
 kernel8-be.img
+BOOTAA64.EFI
 
 # SD card images (generated)
 sd.img
@@ -9,7 +10,7 @@ sdcard.img
 # Disk images (não versionados)
 disks/
 
-# DTB (todos exceto o base baixado)
+# DTB — todos ignorados; o base é baixado automaticamente pelo run.sh
 dtb/*.dtb
 
 # Firmware RPi (baixado automaticamente)
