@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-DTB_DIR="./dtb"
+DTB_DIR="./dtb_qemu"
 DTB="$DTB_DIR/bcm2710-rpi-3-b-plus.dtb"
 DTB_PATCHED="$DTB_DIR/bcm2710-rpi-3-b-plus-patched.dtb"
 DTB_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/native-emulation/dtbs/bcm2710-rpi-3-b-plus.dtb"

@@ -92,7 +92,7 @@ func dtbDir() string {
 	if d := os.Getenv("DTB_DIR"); d != "" {
 		return d
 	}
-	return "dtb"
+	return "dtb_qemu"
 }
 
 func kernelPath() string {

@@ -10,8 +10,9 @@ sdcard.img
 # Disk images (não versionados)
 disks/
 
-# DTB — todos ignorados; o base é baixado automaticamente pelo run.sh
-dtb/*.dtb
+# DTBs para QEMU — baixados automaticamente pelo run.sh
+# (dtb_qemu/README.txt é rastreado por ser .txt, não .dtb)
+dtb_qemu/*.dtb
 
 # Firmware RPi (baixado automaticamente)
 firmware/
