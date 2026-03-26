@@ -100,10 +100,23 @@ impl Framebuffer {
             write_volatile(m.add(38), 0u32.to_le());
             write_volatile(m.add(39), 0u32.to_le());
 
+            unsafe {
+                let addr = m as usize;
+                // 40 entradas de u32 = 160 bytes
+                let size = core::mem::size_of::<MailboxBuffer>();
+                crate::arch::aarch64::regs::cache::flush_range(addr, addr + size);
+            }
+
             log!("FB", "calling mailbox...");
             if !mailbox_call(MBOX_CH_PROP, m) {
                 log!("FB", "mailbox call failed");
                 return None;
+            }
+
+            unsafe {
+                let addr = m as usize;
+                let size = core::mem::size_of::<MailboxBuffer>();
+                crate::arch::aarch64::regs::cache::invalidate_range(addr, addr + size);
             }
 
             log!("FB", "mailbox returned");

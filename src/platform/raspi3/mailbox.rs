@@ -32,18 +32,13 @@ fn dmb() {
 }
 
 pub fn mailbox_call(channel: u8, mbox: *mut u32) -> bool {
-    // FIX: máscara 0x3FFF_FFFF converte para endereço de barramento do GPU.
-    // A máscara original (!0xF) apenas alinhava em 16 bytes mas mantinha
-    // bits altos que o GPU não consegue endereçar, corrompendo a mensagem.
-    let addr = (mbox as usize as u32) & 0x3FFF_FFFF;
+    // CORRETO: alinha em 16 bytes E converte para bus address do VideoCore
+    let addr = ((mbox as usize as u32) & !0xF) | 0xC000_0000;
     let value = addr | (channel as u32 & 0xF);
 
-    // FIX: barreira antes de enviar — garante que todas as escritas no buffer
-    // feitas pelo framebuffer.rs sejam visíveis ao GPU antes do envio.
-    dmb();
+    dmb(); // ✅ já estava correto
 
     while mmio_read(MBOX_STATUS) & MBOX_FULL != 0 {}
-
     mmio_write(MBOX_WRITE, value);
 
     loop {
@@ -51,10 +46,7 @@ pub fn mailbox_call(channel: u8, mbox: *mut u32) -> bool {
 
         let resp = mmio_read(MBOX_READ);
         if resp == value {
-            // FIX: barreira após receber resposta — garante que a leitura
-            // do buffer a seguir enxerga os dados escritos pelo GPU.
-            dmb();
-
+            dmb(); // ✅ já estava correto
             unsafe {
                 return u32::from_le(core::ptr::read_volatile(mbox.add(1))) == 0x8000_0000;
             }

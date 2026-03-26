@@ -137,3 +137,23 @@ pub fn flush_range(start: usize, end: usize) {
     dsb_sy();
     isb();
 }
+
+/// Invalida o cache de dados em um intervalo de endereços.
+/// Força a CPU a ler os dados diretamente da RAM física na próxima tentativa.
+pub fn invalidate_range(start: usize, end: usize) {
+    let mut curr = start & !(64 - 1); // Alinha ao tamanho da linha de cache (64 bytes no Pi 3)
+    
+    while curr < end {
+        unsafe {
+            // dc ivac: Data Cache Invalidate by Virtual Address to Point of Coherency
+            core::arch::asm!("dc ivac, {}", in(reg) curr, options(nostack));
+        }
+        curr += 64;
+    }
+    
+    // Barreiras para garantir que a invalidação terminou antes de prosseguirmos
+    unsafe {
+        core::arch::asm!("dsb sy", options(nostack));
+        core::arch::asm!("isb", options(nostack));
+    }
+}
