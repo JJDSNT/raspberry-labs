@@ -26,6 +26,8 @@ mod kernel;
 mod drivers;
 mod diagnostics;
 mod gfx;
+mod gfx3d;
+mod gpu;
 mod audio;
 mod media;
 
