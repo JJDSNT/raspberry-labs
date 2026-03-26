@@ -9,6 +9,7 @@ pub mod tunnel;
 pub mod parallax;
 pub mod juggler;
 pub mod sprite_bouncer;
+pub mod gfx3d_triangle;
 
 use crate::drivers::framebuffer::Framebuffer;
 use crate::gfx::renderer::Renderer;
@@ -29,6 +30,7 @@ pub enum DemoKind {
     Parallax,
     Juggler,
     SpriteBouncer,
+    Gfx3dTriangle, // 🔥 novo
     Omega,
 }
 
@@ -43,6 +45,7 @@ impl DemoKind {
             DemoKind::Parallax      => "Parallax",
             DemoKind::Juggler       => "Juggler",
             DemoKind::SpriteBouncer => "SpriteBouncer",
+            DemoKind::Gfx3dTriangle => "Gfx3dTriangle", // 🔥 novo
             DemoKind::Omega         => "Omega",
         }
     }
@@ -64,6 +67,8 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
         DemoKind::Parallax      => run_renderer_demo(fb, parallax::ParallaxDemo::new()),
         DemoKind::Juggler       => run_renderer_demo(fb, juggler::JugglerDemo::new()),
         DemoKind::SpriteBouncer => run_renderer_demo(fb, sprite_bouncer::SpriteBouncerDemo::new()),
+        DemoKind::Gfx3dTriangle => run_renderer_demo(fb, gfx3d_triangle::Gfx3dTriangleDemo::new()),
+
         #[cfg(not(target_os = "uefi"))]
         DemoKind::Omega         => crate::emu::run(fb),
         #[cfg(target_os = "uefi")]
@@ -91,7 +96,6 @@ fn run_renderer_demo<D: Demo>(fb: Framebuffer, mut demo: D) -> ! {
         renderer.present();
 
         // Cede para a idle (ou qualquer outra task futura)
-        // sem depender do timer para isso
         crate::kernel::scheduler::yield_now();
     }
 }

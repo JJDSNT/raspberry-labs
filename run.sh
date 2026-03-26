@@ -2,9 +2,9 @@
 set -e
 
 DTB_DIR="./dtb_qemu"
-DTB="$DTB_DIR/bcm2710-rpi-3-b-plus.dtb"
-DTB_PATCHED="$DTB_DIR/bcm2710-rpi-3-b-plus-patched.dtb"
-DTB_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/native-emulation/dtbs/bcm2710-rpi-3-b-plus.dtb"
+DTB="$DTB_DIR/bcm2710-rpi-3-b.dtb"
+DTB_PATCHED="$DTB_DIR/bcm2710-rpi-3-b-patched.dtb"
+DTB_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/native-emulation/dtbs/bcm2710-rpi-3-b.dtb"
 LAUNCHER_DIR="./launch"
 
 TARGET_LE="aarch64-unknown-none-softfloat"
@@ -26,7 +26,7 @@ SDCARD_OVERRIDES="./sdcard"
 
 # Firmware oficial RPi
 FIRMWARE_BASE="https://github.com/raspberrypi/firmware/raw/master/boot"
-FIRMWARE_FILES="bootcode.bin start.elf fixup.dat bcm2710-rpi-3-b-plus.dtb"
+FIRMWARE_FILES="bootcode.bin start.elf fixup.dat bcm2710-rpi-3-b.dtb"
 
 usage() {
     echo "Usage: $0 [-b] [-c] [-C] [-s] [-u]"

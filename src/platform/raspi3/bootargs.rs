@@ -63,6 +63,7 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarg
                     "parallax" => BootTarget::Demo(DemoKind::Parallax),
                     "juggler" => BootTarget::Demo(DemoKind::Juggler),
                     "sprite_bouncer" => BootTarget::Demo(DemoKind::SpriteBouncer),
+                    "gfx3d_triangle" => BootTarget::Demo(DemoKind::Gfx3dTriangle),
                     "omega"          => BootTarget::Demo(DemoKind::Omega),
 
                     _ => return,

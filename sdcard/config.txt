@@ -1,0 +1,9 @@
+arm_64bit=1
+gpu_mem=64
+kernel=kernel8.img
+device_tree=bcm2710-rpi-3-b.dtb
+enable_uart=1
+init_uart_clock=48000000
+dtoverlay=disable-bt
+# opcional para log mais cedo do firmware:
+uart_2ndstage=1

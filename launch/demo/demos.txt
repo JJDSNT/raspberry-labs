@@ -3,6 +3,7 @@
 Omega KS1.2|Emulador Amiga|omega|kick12
 Omega AROS|Emulador Amiga — AROS ROM (livre)|omega|aros.rom
 Juggler|Raytracer clássico Amiga — esferas reflectivas|juggler
+Gfx3D Triangle|Teste inicial de pipeline 3D (software renderer)|gfx3d_triangle
 Sprite Bouncer|Demo de sprite com bounce|sprite_bouncer
 Raster Bars|Barras de cor sincronizadas com raster|rasterbars
 Starfield|Campo de estrelas 3D em perspectiva|starfield
