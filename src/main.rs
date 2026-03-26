@@ -14,13 +14,14 @@ global_asm!(include_str!("arch/aarch64/boot.S"));
 // Necessário em ambos os caminhos (instalado após ExitBootServices no UEFI).
 global_asm!(include_str!("arch/aarch64/vectors.S"));
 
+// Kernel
+#[macro_use]
+mod kernel;
+
 // Core architecture / platform
 mod arch;
 mod boot;
 mod platform;
-
-// Kernel
-mod kernel;
 
 // Drivers / subsystems
 mod drivers;

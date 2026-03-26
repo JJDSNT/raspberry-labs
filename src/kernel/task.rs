@@ -69,6 +69,9 @@ impl Task {
             // Não há mais trampoline — IRQs são habilitadas pelo spsr.
             elr_el1: entry as usize as u64,
             spsr_el1: SPSR_EL1H_IRQ_ENABLED,
+            q: [[0; 2]; 32],
+            fpcr: 0,
+            fpsr: 0,
         };
 
         Self {

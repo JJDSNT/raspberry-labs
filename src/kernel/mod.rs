@@ -1,4 +1,7 @@
+#[macro_use]
 pub mod console;
+
+
 pub mod init;
 pub mod main;
 pub mod time;

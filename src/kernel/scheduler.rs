@@ -15,11 +15,15 @@ use crate::kernel::sync::IrqSafeSpinLock;
 use crate::kernel::task::{Task, TaskEntry, TaskState, MAX_TASKS, TASK_STACK_SIZE};
 
 // Números de SVC — devem coincidir com os emitidos pelas funções públicas.
-pub const SVC_YIELD:    u64 = 0;
-pub const SVC_SLEEP:    u64 = 1;
+pub const SVC_YIELD: u64 = 0;
+pub const SVC_SLEEP: u64 = 1;
 pub const SVC_FINISHED: u64 = 2;
-pub const SVC_BOOT:     u64 = 3;
+pub const SVC_BOOT: u64 = 3;
 
+// Preenchimento de stack para diagnóstico de overflow / high-water mark.
+const STACK_POISON: u8 = 0xA5;
+
+// Cada task ganha um stack fixo.
 static mut TASK_STACKS: [[u8; TASK_STACK_SIZE]; MAX_TASKS] = [[0; TASK_STACK_SIZE]; MAX_TASKS];
 
 pub struct Scheduler {
@@ -50,17 +54,127 @@ impl Scheduler {
         for slot in self.tasks.iter_mut() {
             *slot = None;
         }
+
+        for slot in 0..MAX_TASKS {
+            Self::poison_stack(slot);
+        }
     }
 
-    fn alloc_stack_top(&self, slot: usize) -> usize {
+    #[inline]
+    fn stack_base(slot: usize) -> usize {
+        debug_assert!(slot < MAX_TASKS);
+        unsafe { core::ptr::addr_of!(TASK_STACKS[slot]) as *const u8 as usize }
+    }
+
+    #[inline]
+    fn stack_top(slot: usize) -> usize {
+        let top = Self::stack_base(slot) + TASK_STACK_SIZE;
+        top & !0xFusize
+    }
+
+    #[inline]
+    fn poison_stack(slot: usize) {
+        debug_assert!(slot < MAX_TASKS);
         unsafe {
-            let base = core::ptr::addr_of!(TASK_STACKS[slot]) as *const u8 as usize;
-            let top = base + TASK_STACK_SIZE;
-            top & !0xFusize
+            TASK_STACKS[slot].fill(STACK_POISON);
+        }
+    }
+
+    #[inline]
+    fn alloc_stack_top(&self, slot: usize) -> usize {
+        assert!(slot < MAX_TASKS, "invalid stack slot");
+        Self::stack_top(slot)
+    }
+
+    #[inline]
+    fn validate_internal_state(&self) {
+        assert!(self.task_count <= MAX_TASKS, "task_count corrupted");
+
+        if let Some(cur) = self.current {
+            assert!(cur < self.task_count, "current index corrupted");
+            assert!(self.tasks[cur].is_some(), "current task missing");
+        }
+
+        if let Some(idle) = self.idle_index {
+            assert!(idle < self.task_count, "idle_index corrupted");
+            assert!(self.tasks[idle].is_some(), "idle task missing");
+        }
+    }
+
+    #[inline]
+    fn stack_bytes_used(slot: usize) -> usize {
+        debug_assert!(slot < MAX_TASKS);
+
+        unsafe {
+            let stack = &TASK_STACKS[slot];
+            let mut first_changed = TASK_STACK_SIZE;
+
+            for (i, b) in stack.iter().enumerate() {
+                if *b != STACK_POISON {
+                    first_changed = i;
+                    break;
+                }
+            }
+
+            if first_changed == TASK_STACK_SIZE {
+                0
+            } else {
+                TASK_STACK_SIZE - first_changed
+            }
+        }
+    }
+
+    #[inline]
+    fn stack_overflow_suspected(slot: usize) -> bool {
+        debug_assert!(slot < MAX_TASKS);
+
+        unsafe {
+            TASK_STACKS[slot][0] != STACK_POISON
+                || TASK_STACKS[slot][1] != STACK_POISON
+                || TASK_STACKS[slot][2] != STACK_POISON
+                || TASK_STACKS[slot][3] != STACK_POISON
+                || TASK_STACKS[slot][4] != STACK_POISON
+                || TASK_STACKS[slot][5] != STACK_POISON
+                || TASK_STACKS[slot][6] != STACK_POISON
+                || TASK_STACKS[slot][7] != STACK_POISON
+        }
+    }
+
+    #[inline]
+    fn log_stack_usage(&self, slot: usize, reason: &str) {
+        if slot >= self.task_count {
+            return;
+        }
+
+        let Some(task) = &self.tasks[slot] else {
+            return;
+        };
+
+        let used = Self::stack_bytes_used(slot);
+
+        crate::log!(
+            "SCHED",
+            "stack check: reason={} id={} name={} used={} / {} bytes",
+            reason,
+            task.id.0,
+            task.name,
+            used,
+            TASK_STACK_SIZE
+        );
+
+        if Self::stack_overflow_suspected(slot) {
+            crate::log!(
+                "SCHED",
+                "WARNING: stack overflow suspected for id={} name={}",
+                task.id.0,
+                task.name
+            );
         }
     }
 
     pub fn spawn(&mut self, name: &'static str, entry: TaskEntry) -> Result<usize, &'static str> {
+        self.validate_internal_state();
+
         if self.task_count >= MAX_TASKS {
             return Err("scheduler full");
         }
@@ -69,15 +183,31 @@ impl Scheduler {
         self.next_id += 1;
 
         let slot = self.task_count;
+
+        Self::poison_stack(slot);
+
         let stack_top = self.alloc_stack_top(slot);
 
         self.tasks[slot] = Some(Task::new(id, name, entry, stack_top));
         self.task_count += 1;
 
+        crate::log!(
+            "SCHED",
+            "spawn id={} name={} slot={} stack=[0x{:X}..0x{:X}] size={}",
+            id,
+            name,
+            slot,
+            Self::stack_base(slot),
+            Self::stack_top(slot),
+            TASK_STACK_SIZE
+        );
+
         Ok(id)
     }
 
     pub fn set_idle_task(&mut self, entry: TaskEntry) -> Result<usize, &'static str> {
+        self.validate_internal_state();
+
         if self.idle_index.is_some() {
             return Err("idle task already set");
         }
@@ -90,11 +220,24 @@ impl Scheduler {
         self.next_id += 1;
 
         let slot = self.task_count;
+
+        Self::poison_stack(slot);
+
         let stack_top = self.alloc_stack_top(slot);
 
         self.tasks[slot] = Some(Task::new_idle(id, entry, stack_top));
         self.task_count += 1;
         self.idle_index = Some(slot);
+
+        crate::log!(
+            "SCHED",
+            "set idle id={} slot={} stack=[0x{:X}..0x{:X}] size={}",
+            id,
+            slot,
+            Self::stack_base(slot),
+            Self::stack_top(slot),
+            TASK_STACK_SIZE
+        );
 
         Ok(id)
     }
@@ -149,26 +292,33 @@ impl Scheduler {
     // -----------------------------------------------------------------------
 
     pub fn handle_svc(&mut self, svc_num: u64, ctx: &mut ExceptionContext) {
+        self.validate_internal_state();
+
         match svc_num {
             SVC_BOOT => {
-                // Primeiro dispatch — escolhe a primeira task pronta.
                 let next_idx = match self.next_ready_index(false) {
                     Some(idx) => idx,
                     None => panic!("svc boot dispatch: no runnable tasks"),
                 };
 
                 self.current = Some(next_idx);
-                let task = self.tasks[next_idx].as_mut().unwrap();
-                task.state = TaskState::Running;
 
-                crate::log!(
-                    "SCHED",
-                    "boot dispatch id={} name={}",
-                    task.id.0,
-                    task.name
-                );
+                let frame = {
+                    let task = self.tasks[next_idx].as_mut().unwrap();
+                    task.state = TaskState::Running;
 
-                *ctx = task.frame;
+                    crate::log!(
+                        "SCHED",
+                        "boot dispatch id={} name={}",
+                        task.id.0,
+                        task.name
+                    );
+
+                    task.frame
+                };
+
+                self.log_stack_usage(next_idx, "boot");
+                *ctx = frame;
             }
 
             SVC_YIELD | SVC_SLEEP | SVC_FINISHED => {
@@ -204,6 +354,8 @@ impl Scheduler {
                     current.state = next_state;
                 }
 
+                self.log_stack_usage(current_idx, "svc-exit");
+
                 let include_current = next_state == TaskState::Ready;
 
                 let next_idx = match self.next_ready_index(include_current) {
@@ -219,7 +371,6 @@ impl Scheduler {
                     return;
                 }
 
-                let old_id = self.tasks[current_idx].as_ref().unwrap().id.0;
                 self.current = Some(next_idx);
 
                 let new_frame = {
@@ -228,6 +379,7 @@ impl Scheduler {
                     next.frame
                 };
 
+                self.log_stack_usage(next_idx, "svc-enter");
                 *ctx = new_frame;
             }
 
@@ -242,6 +394,8 @@ impl Scheduler {
     // -----------------------------------------------------------------------
 
     pub fn preempt_from_irq(&mut self, ctx: &mut ExceptionContext) {
+        self.validate_internal_state();
+
         let current_idx = match self.current {
             Some(i) => i,
             None => return,
@@ -252,6 +406,8 @@ impl Scheduler {
             current.frame = *ctx;
             current.state = TaskState::Ready;
         }
+
+        self.log_stack_usage(current_idx, "irq-exit");
 
         let next_idx = match self.next_ready_index(true) {
             Some(idx) => idx,
@@ -266,7 +422,6 @@ impl Scheduler {
             return;
         }
 
-        let old_id = self.tasks[current_idx].as_ref().unwrap().id.0;
         self.current = Some(next_idx);
 
         let new_frame = {
@@ -275,6 +430,7 @@ impl Scheduler {
             next.frame
         };
 
+        self.log_stack_usage(next_idx, "irq-enter");
         *ctx = new_frame;
     }
 
@@ -283,13 +439,28 @@ impl Scheduler {
     // -----------------------------------------------------------------------
 
     pub fn wake_task(&mut self, id: usize) -> bool {
+        self.validate_internal_state();
+
         for slot in self.tasks.iter_mut().flatten() {
             if slot.id.0 == id && slot.state == TaskState::Sleeping {
                 slot.state = TaskState::Ready;
                 return true;
             }
         }
+
         false
+    }
+
+    // -----------------------------------------------------------------------
+    // Debug helpers públicos
+    // -----------------------------------------------------------------------
+
+    pub fn debug_dump_stacks(&self) {
+        self.validate_internal_state();
+
+        for slot in 0..self.task_count {
+            self.log_stack_usage(slot, "manual-dump");
+        }
     }
 }
 
@@ -352,4 +523,8 @@ pub fn preempt_from_irq(ctx: &mut ExceptionContext) {
 
 pub fn handle_svc(svc_num: u64, ctx: &mut ExceptionContext) {
     SCHEDULER.lock().handle_svc(svc_num, ctx);
+}
+
+pub fn debug_dump_stacks() {
+    SCHEDULER.lock().debug_dump_stacks();
 }

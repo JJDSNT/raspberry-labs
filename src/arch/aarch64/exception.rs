@@ -5,10 +5,23 @@ use core::arch::asm;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ExceptionContext {
-    pub x: [u64; 31], // x0..x30
+    // x0..x30
+    pub x: [u64; 31],
+
+    // SP de execução da task/contexto interrompido
     pub sp: u64,
+
+    // Estado de retorno
     pub elr_el1: u64,
     pub spsr_el1: u64,
+
+    // q0..q31 (128 bits cada)
+    // Cada qN é armazenado como [low64, high64]
+    pub q: [[u64; 2]; 32],
+
+    // Estado FP/SIMD
+    pub fpcr: u64,
+    pub fpsr: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -136,7 +149,7 @@ extern "C" fn rust_serror_exception_current_el_sp0(ctx: &mut ExceptionContext) {
 extern "C" fn rust_sync_exception_current_el_spx(ctx: &mut ExceptionContext) {
     let esr: u64;
     unsafe {
-        core::arch::asm!("mrs {}, ESR_EL1", out(reg) esr);
+        asm!("mrs {}, ESR_EL1", out(reg) esr, options(nomem, nostack, preserves_flags));
     }
     crate::log!("EXC", "sync_spx ESR={:#018x}", esr);
     unhandled_exception("sync current_el_spx", ctx);
@@ -189,12 +202,9 @@ extern "C" fn rust_irq_exception_lower_el_aarch32(ctx: &mut ExceptionContext) {
 
 #[no_mangle]
 extern "C" fn rust_svc_handler(svc_num: u64, ctx: &mut ExceptionContext) {
-    // IRQs já estão mascaradas pela CPU ao entrar na exceção.
-    // Garante que permanecem assim durante todo o handler,
-    // independente do que o lock faça ao ser dropado.
-    unsafe { crate::arch::aarch64::exception::disable_interrupts() };
+    disable_interrupts();
     crate::kernel::scheduler::handle_svc(svc_num, ctx);
-    // IRQs serão reabilitadas pelo spsr_el1 da próxima task no eret.
+    // IRQs voltam conforme spsr_el1 do contexto restaurado via eret.
 }
 
 #[no_mangle]
@@ -209,7 +219,7 @@ extern "C" fn rust_serror_exception_lower_el_aarch32(ctx: &mut ExceptionContext)
 
 #[inline(never)]
 fn handle_irq(ctx: &mut ExceptionContext) {
-    unsafe { crate::arch::aarch64::exception::disable_interrupts() };
+    disable_interrupts();
     crate::arch::aarch64::irq::dispatch_pending_irqs(ctx);
 }
 
@@ -248,7 +258,11 @@ fn unhandled_exception(kind: &str, ctx: &ExceptionContext) -> ! {
                     "X0={:#018x}\n",
                     "X1={:#018x}\n",
                     "X2={:#018x}\n",
-                    "X3={:#018x}"
+                    "X3={:#018x}\n",
+                    "Q0=[{:#018x}, {:#018x}]\n",
+                    "Q1=[{:#018x}, {:#018x}]\n",
+                    "FPCR={:#018x}\n",
+                    "FPSR={:#018x}"
                 ),
                 kind,
                 el,
@@ -262,6 +276,12 @@ fn unhandled_exception(kind: &str, ctx: &ExceptionContext) -> ! {
                 ctx.x[1],
                 ctx.x[2],
                 ctx.x[3],
+                ctx.q[0][0],
+                ctx.q[0][1],
+                ctx.q[1][0],
+                ctx.q[1][1],
+                ctx.fpcr,
+                ctx.fpsr,
             );
         }
         2 => {
@@ -306,7 +326,11 @@ fn unhandled_exception(kind: &str, ctx: &ExceptionContext) -> ! {
                     "X0={:#018x}\n",
                     "X1={:#018x}\n",
                     "X2={:#018x}\n",
-                    "X3={:#018x}"
+                    "X3={:#018x}\n",
+                    "Q0=[{:#018x}, {:#018x}]\n",
+                    "Q1=[{:#018x}, {:#018x}]\n",
+                    "FPCR={:#018x}\n",
+                    "FPSR={:#018x}"
                 ),
                 kind,
                 el,
@@ -320,6 +344,12 @@ fn unhandled_exception(kind: &str, ctx: &ExceptionContext) -> ! {
                 ctx.x[1],
                 ctx.x[2],
                 ctx.x[3],
+                ctx.q[0][0],
+                ctx.q[0][1],
+                ctx.q[1][0],
+                ctx.q[1][1],
+                ctx.fpcr,
+                ctx.fpsr,
             );
         }
         _ => {
@@ -332,7 +362,10 @@ fn unhandled_exception(kind: &str, ctx: &ExceptionContext) -> ! {
                     "X0={:#018x}\n",
                     "X1={:#018x}\n",
                     "X2={:#018x}\n",
-                    "X3={:#018x}"
+                    "X3={:#018x}\n",
+                    "Q0=[{:#018x}, {:#018x}]\n",
+                    "FPCR={:#018x}\n",
+                    "FPSR={:#018x}"
                 ),
                 kind,
                 el,
@@ -342,6 +375,10 @@ fn unhandled_exception(kind: &str, ctx: &ExceptionContext) -> ! {
                 ctx.x[1],
                 ctx.x[2],
                 ctx.x[3],
+                ctx.q[0][0],
+                ctx.q[0][1],
+                ctx.fpcr,
+                ctx.fpsr,
             );
         }
     }

@@ -1,14 +1,16 @@
 [build]
-target = "aarch64-unknown-none-softfloat"
+target = "aarch64-unknown-none"
 
-[target.aarch64-unknown-none-softfloat]
+[target.aarch64-unknown-none]
 rustflags = [
     "-C", "link-arg=-Tlinker.ld",
+    "-C", "target-feature=+fp-armv8,+neon",
 ]
 
 # Big-endian target — usar via: make be
 # Requer nightly: cargo +nightly build -Z build-std=core,compiler_builtins
-[target."aarch64_be-unknown-none-softfloat.json"]
+[target."aarch64_be-unknown-none.json"]
 rustflags = [
     "-C", "link-arg=-Tlinker.ld",
+    "-C", "target-feature=+fp-armv8,+neon",
 ]

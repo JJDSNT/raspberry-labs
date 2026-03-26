@@ -7,7 +7,7 @@ DTB_PATCHED="$DTB_DIR/bcm2710-rpi-3-b-patched.dtb"
 DTB_URL="https://github.com/dhruvvyas90/qemu-rpi-kernel/raw/master/native-emulation/dtbs/bcm2710-rpi-3-b.dtb"
 LAUNCHER_DIR="./launch"
 
-TARGET_LE="aarch64-unknown-none-softfloat"
+TARGET_LE="aarch64-unknown-none"
 TARGET_BE="aarch64_be-unknown-none-softfloat.json"
 TARGET_UEFI="aarch64-unknown-uefi"
 

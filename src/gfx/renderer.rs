@@ -10,7 +10,7 @@ use crate::gfx::blitter::Blitter;
 use crate::gfx::copper::CopperList;
 use crate::gfx::font;
 use crate::gfx::primitives;
-use crate::gfx::sprite::{sprite_pixel, Sprite, SpriteBatch, SpriteInstance};
+use crate::gfx::sprite::{sprite_pixel, SpriteBatch, SpriteInstance};
 
 // ---------------------------------------------------------------------------
 // Limites máximos do renderer
@@ -25,14 +25,26 @@ pub const FRAMEBUFFER_SIZE: usize = MAX_PIXELS * BYTES_PER_PIXEL;
 const COPPER_CAPACITY: usize = 256;
 
 // ---------------------------------------------------------------------------
-// Buffers estáticos (.bss)
+// Buffers estáticos (.bss) com Proteção de Memória
 // ---------------------------------------------------------------------------
 
-static mut RENDER_BUFFERS: [[u32; MAX_PIXELS]; 2] = [[0; MAX_PIXELS]; 2];
+#[repr(align(16))]
+struct SafeBuffer {
+    data: [[u32; MAX_PIXELS]; 2],
+    // Padding de segurança para evitar que overflow de pixels
+    // atropele outras estruturas globais no kernel.
+    _padding: [u8; 1024],
+}
+
+static mut RENDER_BUFFERS: SafeBuffer = SafeBuffer {
+    data: [[0; MAX_PIXELS]; 2],
+    _padding: [0; 1024],
+};
+
 static RENDERER_TAKEN: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
-// Double-buffer
+// Double-buffer Enum
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -57,22 +69,24 @@ impl BufferIndex {
 }
 
 // ---------------------------------------------------------------------------
-// Renderer
+// Renderer Struct
 // ---------------------------------------------------------------------------
 
 pub struct Renderer {
+    // Campos de controle primeiro (mais seguros contra corrupção de ponteiros)
+    width: usize,
+    height: usize,
+    pixels: usize,
+    draw: BufferIndex,
+    frame_count: u64,
+
+    // Componentes de hardware/software
     fb: Framebuffer,
     blitter: Blitter,
     copper: CopperList<COPPER_CAPACITY>,
 
+    // Buffers por último
     buffers: &'static mut [[u32; MAX_PIXELS]; 2],
-
-    width: usize,
-    height: usize,
-    pixels: usize,
-
-    draw: BufferIndex,
-    frame_count: u64,
 }
 
 impl Renderer {
@@ -84,29 +98,26 @@ impl Renderer {
         let height = fb.height as usize;
         let pixels = width.saturating_mul(height);
 
-        assert!(width > 0, "Renderer width must be > 0");
-        assert!(height > 0, "Renderer height must be > 0");
         assert!(
             width <= MAX_WIDTH && height <= MAX_HEIGHT,
-            "Renderer resolution exceeds static buffer capacity"
+            "Resolution exceeds static buffer"
         );
+        assert!(pixels <= MAX_PIXELS, "Pixel count exceeds static buffer");
 
         Self {
-            fb,
-            blitter: Blitter::new(width, height),
-            copper: CopperList::new(),
-            buffers: unsafe { &mut RENDER_BUFFERS },
             width,
             height,
             pixels,
             draw: BufferIndex::Back,
             frame_count: 0,
+            fb,
+            blitter: Blitter::new(width, height),
+            copper: CopperList::new(),
+            buffers: unsafe { &mut RENDER_BUFFERS.data },
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Helpers de índices
-    // -----------------------------------------------------------------------
+    // --- Helpers de Buffer ---
 
     #[inline]
     fn back_index(&self) -> usize {
@@ -123,119 +134,17 @@ impl Renderer {
         &mut self.buffers[self.back_index()]
     }
 
-    #[inline]
-    fn front_buffer_full(&self) -> &[u32; MAX_PIXELS] {
-        &self.buffers[self.front_index()]
-    }
-
-    #[inline]
-    fn blend_over(dst: u32, src: u32) -> u32 {
-        let sa = (src >> 24) & 0xFF;
-        if sa == 0 {
-            return dst;
-        }
-        if sa == 0xFF {
-            return src;
-        }
-
-        let sr = (src >> 16) & 0xFF;
-        let sg = (src >> 8) & 0xFF;
-        let sb = src & 0xFF;
-
-        let da = (dst >> 24) & 0xFF;
-        let dr = (dst >> 16) & 0xFF;
-        let dg = (dst >> 8) & 0xFF;
-        let db = dst & 0xFF;
-
-        let inv_sa = 255 - sa;
-
-        let out_a = sa + (da * inv_sa) / 255;
-        let out_r = (sr * sa + dr * inv_sa) / 255;
-        let out_g = (sg * sa + dg * inv_sa) / 255;
-        let out_b = (sb * sa + db * inv_sa) / 255;
-
-        ((out_a & 0xFF) << 24)
-            | ((out_r & 0xFF) << 16)
-            | ((out_g & 0xFF) << 8)
-            | (out_b & 0xFF)
-    }
-
-    fn draw_sprite_instance_impl(&mut self, instance: &SpriteInstance<'_>) {
-        if !instance.visible || !instance.is_valid() {
-            return;
-        }
-
-        let width_i32 = self.width as i32;
-        let height_i32 = self.height as i32;
-
-        let src_w = instance.src.w as i32;
-        let src_h = instance.src.h as i32;
-
-        let dst_left = instance.x;
-        let dst_top = instance.y;
-        let dst_right = dst_left + src_w;
-        let dst_bottom = dst_top + src_h;
-
-        if dst_right <= 0 || dst_bottom <= 0 || dst_left >= width_i32 || dst_top >= height_i32 {
-            return;
-        }
-
-        let clip_left = dst_left.max(0);
-        let clip_top = dst_top.max(0);
-        let clip_right = dst_right.min(width_i32);
-        let clip_bottom = dst_bottom.min(height_i32);
-
-        let start_x = (clip_left - dst_left) as usize;
-        let start_y = (clip_top - dst_top) as usize;
-        let end_x = (clip_right - dst_left) as usize;
-        let end_y = (clip_bottom - dst_top) as usize;
-
-        let width = self.width;
-        let idx = self.back_index();
-        let buffer = &mut self.buffers[idx];
-
-        let mut local_y = start_y;
-        while local_y < end_y {
-            let screen_y = (dst_top + local_y as i32) as usize;
-            let row_base = screen_y * width;
-
-            let mut local_x = start_x;
-            while local_x < end_x {
-                if let Some(src_px) = sprite_pixel(instance, local_x, local_y) {
-                    let alpha = (src_px >> 24) & 0xFF;
-                    if alpha != 0 {
-                        let screen_x = (dst_left + local_x as i32) as usize;
-                        let dst_idx = row_base + screen_x;
-
-                        if alpha == 0xFF {
-                            buffer[dst_idx] = src_px;
-                        } else {
-                            let dst_px = buffer[dst_idx];
-                            buffer[dst_idx] = Self::blend_over(dst_px, src_px);
-                        }
-                    }
-                }
-
-                local_x += 1;
-            }
-
-            local_y += 1;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // API de frame
-    // -----------------------------------------------------------------------
+    // --- API de Frame ---
 
     #[inline]
     pub fn back_buffer(&mut self) -> &mut [u32] {
-        let pixels = self.pixels;
-        &mut self.back_buffer_full()[..pixels]
+        let p = self.pixels;
+        &mut self.back_buffer_full()[..p]
     }
 
     #[inline]
     pub fn front_buffer(&self) -> &[u32] {
-        &self.front_buffer_full()[..self.pixels]
+        &self.buffers[self.front_index()][..self.pixels]
     }
 
     #[inline]
@@ -248,35 +157,35 @@ impl Renderer {
         self.clear(0xFF00_0000);
     }
 
-    pub fn run_copper(&mut self) {
-        let idx = self.back_index();
-        self.copper
-            .execute(&mut self.buffers[idx][..self.pixels], self.width, self.height);
-    }
-
     pub fn present(&mut self) {
         let idx = self.back_index();
-        self.fb.blit_argb(&self.buffers[idx][..self.pixels]);
+        let limit = self.pixels.min(MAX_PIXELS);
+        self.fb.blit_argb(&self.buffers[idx][..limit]);
         self.draw = self.draw.flip();
         self.frame_count = self.frame_count.wrapping_add(1);
     }
 
-    // -----------------------------------------------------------------------
-    // Primitivas de blitter (retangulares)
-    // -----------------------------------------------------------------------
+    // --- Primitivas de Pixel e Blitter ---
 
     #[inline]
     pub fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
         if x < self.width && y < self.height {
             let idx = y * self.width + x;
-            self.buffers[self.back_index()][idx] = color;
+            if idx < self.pixels {
+                self.buffers[self.back_index()][idx] = color;
+            }
         }
     }
 
     #[inline]
     pub fn get_pixel(&self, x: usize, y: usize) -> u32 {
         if x < self.width && y < self.height {
-            self.buffers[self.back_index()][y * self.width + x]
+            let idx = y * self.width + x;
+            if idx < self.pixels {
+                self.buffers[self.back_index()][idx]
+            } else {
+                0
+            }
         } else {
             0
         }
@@ -284,261 +193,232 @@ impl Renderer {
 
     pub fn hline(&mut self, y: usize, x0: usize, x1: usize, color: u32) {
         let idx = self.back_index();
+        let p = self.pixels;
         self.blitter
-            .hline(&mut self.buffers[idx][..self.pixels], y, x0, x1, color);
+            .hline(&mut self.buffers[idx][..p], y, x0, x1, color);
     }
 
     pub fn vline(&mut self, x: usize, y0: usize, y1: usize, color: u32) {
         let idx = self.back_index();
+        let p = self.pixels;
         self.blitter
-            .vline(&mut self.buffers[idx][..self.pixels], x, y0, y1, color);
+            .vline(&mut self.buffers[idx][..p], x, y0, y1, color);
     }
 
     pub fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: u32) {
         let idx = self.back_index();
+        let p = self.pixels;
         self.blitter
-            .fill_rect(&mut self.buffers[idx][..self.pixels], x, y, w, h, color);
+            .fill_rect(&mut self.buffers[idx][..p], x, y, w, h, color);
     }
 
-    pub fn blit_sprite(
-        &mut self,
-        sprite: &[u32],
-        sw: usize,
-        sh: usize,
-        dx: usize,
-        dy: usize,
-    ) {
+    // --- Primitivas Geométricas (primitives.rs) ---
+
+    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
         let idx = self.back_index();
-        self.blitter.blit_alpha(
-            &mut self.buffers[idx][..self.pixels],
-            sprite,
-            sw,
-            sh,
-            dx,
-            dy,
+        let p = self.pixels;
+        primitives::line(
+            &mut self.buffers[idx][..p],
             self.width,
             self.height,
+            x0,
+            y0,
+            x1,
+            y1,
+            color,
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Sprites
-    // -----------------------------------------------------------------------
-
-    #[inline]
-    pub fn draw_sprite(&mut self, sprite: &Sprite<'_>, x: i32, y: i32) {
-        let instance = SpriteInstance::new(sprite, x, y);
-        self.draw_sprite_instance_impl(&instance);
+    pub fn draw_circle(&mut self, cx: i32, cy: i32, r: i32, color: u32) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        primitives::circle(
+            &mut self.buffers[idx][..p],
+            self.width,
+            self.height,
+            cx,
+            cy,
+            r,
+            color,
+        );
     }
 
-    #[inline]
+    pub fn fill_circle(&mut self, cx: i32, cy: i32, r: i32, color: u32) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        primitives::fill_circle(
+            &mut self.buffers[idx][..p],
+            self.width,
+            self.height,
+            cx,
+            cy,
+            r,
+            color,
+        );
+    }
+
+    pub fn draw_ellipse(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: u32) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        primitives::ellipse(
+            &mut self.buffers[idx][..p],
+            self.width,
+            self.height,
+            cx,
+            cy,
+            rx,
+            ry,
+            color,
+        );
+    }
+
+    pub fn fill_ellipse(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: u32) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        primitives::fill_ellipse(
+            &mut self.buffers[idx][..p],
+            self.width,
+            self.height,
+            cx,
+            cy,
+            rx,
+            ry,
+            color,
+        );
+    }
+
+    // --- Texto (font.rs) ---
+
+    pub fn draw_str(&mut self, x: usize, y: usize, s: &str, fg: u32, bg: u32) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        font::draw_str(&mut self.buffers[idx][..p], self.width, self.height, x, y, s, fg, bg);
+    }
+
+    pub fn draw_str_transparent(&mut self, x: usize, y: usize, s: &str, fg: u32) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        font::draw_str_transparent(
+            &mut self.buffers[idx][..p],
+            self.width,
+            self.height,
+            x,
+            y,
+            s,
+            fg,
+        );
+    }
+
+    // --- Sprites ---
+
     pub fn draw_sprite_instance(&mut self, instance: &SpriteInstance<'_>) {
-        self.draw_sprite_instance_impl(instance);
+        if !instance.visible || !instance.is_valid() {
+            return;
+        }
+
+        let width = self.width;
+        let height = self.height;
+        let pixels = self.pixels;
+        let back_idx = self.back_index();
+        let buffer = &mut self.buffers[back_idx];
+
+        // Trabalha tudo em i32 até a última conversão.
+        let sprite_w = instance.src.w as i32;
+        let sprite_h = instance.src.h as i32;
+
+        // Usa saturating_add para evitar overflow de i32 em posições extremas.
+        let raw_x1 = instance.x.saturating_add(sprite_w);
+        let raw_y1 = instance.y.saturating_add(sprite_h);
+
+        let x0 = instance.x.max(0);
+        let y0 = instance.y.max(0);
+        let x1 = raw_x1.min(width as i32);
+        let y1 = raw_y1.min(height as i32);
+
+        // Totalmente fora da tela ou retângulo inválido.
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+
+        for sy in y0..y1 {
+            let syu = sy as usize;
+            let row_base = syu * width;
+
+            // Como sy está dentro da interseção clipada, ly fica seguro.
+            let ly_i32 = sy - instance.y;
+            if ly_i32 < 0 {
+                continue;
+            }
+            let ly = ly_i32 as usize;
+
+            for sx in x0..x1 {
+                let sxu = sx as usize;
+
+                let lx_i32 = sx - instance.x;
+                if lx_i32 < 0 {
+                    continue;
+                }
+                let lx = lx_i32 as usize;
+
+                if let Some(src_px) = sprite_pixel(instance, lx, ly) {
+                    if (src_px >> 24) & 0xFF != 0 {
+                        let dst_idx = row_base + sxu;
+                        if dst_idx < pixels {
+                            // sem alpha blend por performance
+                            buffer[dst_idx] = src_px;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn draw_sprite_batch<const N: usize>(&mut self, batch: &SpriteBatch<'_, N>) {
-        batch.for_each_sorted(|instance| {
-            self.draw_sprite_instance_impl(instance);
-        });
+        batch.for_each_sorted(|instance| self.draw_sprite_instance(instance));
     }
 
-    // -----------------------------------------------------------------------
-    // Primitivas geométricas (primitives.rs)
-    // -----------------------------------------------------------------------
+    // --- Efeitos e Copper ---
 
-    /// Linha de Bresenham entre dois pontos.
-    pub fn draw_line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u32) {
-        let idx = self.back_index();
-        primitives::line(
-            &mut self.buffers[idx][..self.pixels],
-            self.width, self.height,
-            x0, y0, x1, y1,
-            color,
-        );
-    }
-
-    /// Círculo (borda) centrado em (cx, cy) com raio r.
-    pub fn draw_circle(&mut self, cx: i32, cy: i32, r: i32, color: u32) {
-        let idx = self.back_index();
-        primitives::circle(
-            &mut self.buffers[idx][..self.pixels],
-            self.width, self.height,
-            cx, cy, r,
-            color,
-        );
-    }
-
-    /// Círculo preenchido centrado em (cx, cy) com raio r.
-    pub fn fill_circle(&mut self, cx: i32, cy: i32, r: i32, color: u32) {
-        let idx = self.back_index();
-        primitives::fill_circle(
-            &mut self.buffers[idx][..self.pixels],
-            self.width, self.height,
-            cx, cy, r,
-            color,
-        );
-    }
-
-    /// Elipse (borda) centrada em (cx, cy) com semi-eixos rx e ry.
-    pub fn draw_ellipse(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: u32) {
-        let idx = self.back_index();
-        primitives::ellipse(
-            &mut self.buffers[idx][..self.pixels],
-            self.width, self.height,
-            cx, cy, rx, ry,
-            color,
-        );
-    }
-
-    /// Elipse preenchida centrada em (cx, cy) com semi-eixos rx e ry.
-    pub fn fill_ellipse(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: u32) {
-        let idx = self.back_index();
-        primitives::fill_ellipse(
-            &mut self.buffers[idx][..self.pixels],
-            self.width, self.height,
-            cx, cy, rx, ry,
-            color,
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Texto (font.rs)
-    // -----------------------------------------------------------------------
-
-    /// Desenha um caractere 8×8 em (x, y) com cor de frente e fundo.
-    pub fn draw_char(&mut self, x: usize, y: usize, ch: char, fg: u32, bg: u32) {
-        let idx = self.back_index();
-        font::draw_char(
-            &mut self.buffers[idx][..self.pixels],
-            self.width,
-            self.height,
-            x,
-            y,
-            ch,
-            fg,
-            bg,
-        );
-    }
-
-    /// Desenha um caractere 8×8 sem pintar o fundo (transparente).
-    pub fn draw_char_transparent(&mut self, x: usize, y: usize, ch: char, fg: u32) {
-        let idx = self.back_index();
-        font::draw_char_transparent(
-            &mut self.buffers[idx][..self.pixels],
-            self.width,
-            self.height,
-            x,
-            y,
-            ch,
-            fg,
-        );
-    }
-
-    /// Desenha uma string 8×8 em (x, y) com cor de frente e fundo.
-    pub fn draw_str(&mut self, x: usize, y: usize, s: &str, fg: u32, bg: u32) {
-        let idx = self.back_index();
-        font::draw_str(
-            &mut self.buffers[idx][..self.pixels],
-            self.width,
-            self.height,
-            x,
-            y,
-            s,
-            fg,
-            bg,
-        );
-    }
-
-    /// Desenha uma string 8×8 sem fundo (transparente).
-    pub fn draw_str_transparent(&mut self, x: usize, y: usize, s: &str, fg: u32) {
-        let idx = self.back_index();
-        font::draw_str_transparent(
-            &mut self.buffers[idx][..self.pixels],
-            self.width,
-            self.height,
-            x,
-            y,
-            s,
-            fg,
-        );
-    }
-
-    /// Largura em pixels de uma string com a fonte 8×8.
-    #[inline]
-    pub fn str_width(s: &str) -> usize {
-        font::str_width(s)
-    }
-
-    /// Altura de um glifo 8×8.
-    #[inline]
-    pub fn glyph_height() -> usize {
-        font::GLYPH_H
-    }
-
-    // -----------------------------------------------------------------------
-    // Efeitos fullscreen
-    // -----------------------------------------------------------------------
-
-    /// Escurece o back-buffer em direção ao preto.
-    /// amount=0 → imagem original, amount=255 → preto total.
-    pub fn fade_to_black(&mut self, amount: u8) {
-        let factor = 255u32 - amount as u32;
-        let idx = self.back_index();
-
-        for px in self.buffers[idx][..self.pixels].iter_mut() {
-            let r = ((*px >> 16) & 0xFF) * factor / 255;
-            let g = ((*px >> 8)  & 0xFF) * factor / 255;
-            let b = (*px         & 0xFF) * factor / 255;
-            *px = 0xFF00_0000 | (r << 16) | (g << 8) | b;
-        }
-    }
-
-    /// Clareia a partir do preto.
-    /// amount=0 → preto total, amount=255 → imagem original.
-    #[inline]
-    pub fn fade_from_black(&mut self, amount: u8) {
-        self.fade_to_black(255 - amount);
-    }
-
-    /// Mistura o frame atual com o anterior (ghosting/trail).
-    /// blend=255 → quase só frame atual, blend=0 → quase só frame anterior.
-    pub fn motion_blur(&mut self, blend: u8) {
-        let keep_new = blend as u32;
-        let keep_old = 255u32 - keep_new;
-
-        let front_idx = self.front_index();
-        let back_idx = self.back_index();
-        let pixels = self.pixels;
-
-        let (front, back): (&[u32; MAX_PIXELS], &mut [u32; MAX_PIXELS]) =
-            if front_idx < back_idx {
-                let (lo, hi) = self.buffers.split_at_mut(back_idx);
-                (&lo[front_idx], &mut hi[0])
-            } else {
-                let (lo, hi) = self.buffers.split_at_mut(front_idx);
-                (&hi[0], &mut lo[back_idx])
-            };
-
-        for (dst, src) in back[..pixels].iter_mut().zip(front[..pixels].iter()) {
-            let r = (((*dst >> 16) & 0xFF) * keep_new + ((src >> 16) & 0xFF) * keep_old) / 255;
-            let g = (((*dst >> 8) & 0xFF) * keep_new + ((src >> 8) & 0xFF) * keep_old) / 255;
-            let b = (((*dst) & 0xFF) * keep_new + ((*src) & 0xFF) * keep_old) / 255;
-            *dst = 0xFF00_0000 | (r << 16) | (g << 8) | b;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Copper
-    // -----------------------------------------------------------------------
-
-    #[inline]
     pub fn copper_mut(&mut self) -> &mut CopperList<COPPER_CAPACITY> {
         &mut self.copper
     }
 
-    // -----------------------------------------------------------------------
-    // Informação
-    // -----------------------------------------------------------------------
+    pub fn run_copper(&mut self) {
+        let idx = self.back_index();
+        let p = self.pixels;
+        self.copper
+            .execute(&mut self.buffers[idx][..p], self.width, self.height);
+    }
+
+    pub fn motion_blur(&mut self, blend: u8) {
+        if blend == 255 {
+            return;
+        }
+
+        let keep_new = blend as u32;
+        let keep_old = 255 - keep_new;
+        let pixels_limit = self.pixels.min(MAX_PIXELS);
+
+        let (slice_0, slice_1) = self.buffers.split_at_mut(1);
+        let (front_buf, back_buf) = if self.draw == BufferIndex::Back {
+            (slice_0[0].as_slice(), &mut slice_1[0])
+        } else {
+            (slice_1[0].as_slice(), &mut slice_0[0])
+        };
+
+        for i in 0..pixels_limit {
+            let src = front_buf[i];
+            let dst = &mut back_buf[i];
+
+            let r = (((*dst >> 16) & 0xFF) * keep_new + ((src >> 16) & 0xFF) * keep_old) / 255;
+            let g = (((*dst >> 8) & 0xFF) * keep_new + ((src >> 8) & 0xFF) * keep_old) / 255;
+            let b = ((*dst & 0xFF) * keep_new + (src & 0xFF) * keep_old) / 255;
+
+            *dst = 0xFF00_0000 | (r << 16) | (g << 8) | b;
+        }
+    }
+
+    // --- Getters ---
 
     #[inline]
     pub fn width(&self) -> usize {
@@ -548,11 +428,6 @@ impl Renderer {
     #[inline]
     pub fn height(&self) -> usize {
         self.height
-    }
-
-    #[inline]
-    pub fn pixels(&self) -> usize {
-        self.pixels
     }
 
     #[inline]

@@ -38,17 +38,22 @@ impl Blitter {
     #[inline]
     pub fn put_pixel(&self, dst: &mut [u32], x: usize, y: usize, color: u32) {
         if x < self.width && y < self.height {
-            dst[y * self.width + x] = color;
+            let idx = y * self.width + x;
+            if idx < dst.len() {
+                dst[idx] = color;
+            }
         }
     }
 
     #[inline]
     pub fn get_pixel(&self, src: &[u32], x: usize, y: usize) -> u32 {
         if x < self.width && y < self.height {
-            src[y * self.width + x]
-        } else {
-            0
+            let idx = y * self.width + x;
+            if idx < src.len() {
+                return src[idx];
+            }
         }
+        0
     }
 
     // -----------------------------------------------------------------------
@@ -56,7 +61,7 @@ impl Blitter {
     // -----------------------------------------------------------------------
 
     pub fn hline(&self, dst: &mut [u32], y: usize, x0: usize, x1: usize, color: u32) {
-        if y >= self.height {
+        if y >= self.height || self.width == 0 {
             return;
         }
 
@@ -72,13 +77,20 @@ impl Blitter {
         }
 
         let row = y * self.width;
+        if row >= dst.len() {
+            return;
+        }
+
+        let max_x_by_dst = dst.len().saturating_sub(row + 1);
+        let xb = xb.min(max_x_by_dst);
+
         for x in xa..=xb {
             dst[row + x] = color;
         }
     }
 
     pub fn vline(&self, dst: &mut [u32], x: usize, y0: usize, y1: usize, color: u32) {
-        if x >= self.width {
+        if x >= self.width || self.height == 0 {
             return;
         }
 
@@ -94,7 +106,12 @@ impl Blitter {
         }
 
         for y in ya..=yb {
-            dst[y * self.width + x] = color;
+            let idx = y * self.width + x;
+            if idx < dst.len() {
+                dst[idx] = color;
+            } else {
+                break;
+            }
         }
     }
 
@@ -119,12 +136,19 @@ impl Blitter {
             return;
         }
 
-        let x_end = (x + w).min(self.width);
-        let y_end = (y + h).min(self.height);
+        let x_end = x.saturating_add(w).min(self.width);
+        let y_end = y.saturating_add(h).min(self.height);
 
         for yy in y..y_end {
             let row = yy * self.width;
-            for xx in x..x_end {
+            if row >= dst.len() {
+                break;
+            }
+
+            let max_x_exclusive = dst.len().saturating_sub(row).min(self.width);
+            let safe_x_end = x_end.min(max_x_exclusive);
+
+            for xx in x..safe_x_end {
                 dst[row + xx] = color;
             }
         }
@@ -147,7 +171,7 @@ impl Blitter {
         screen_w: usize,
         screen_h: usize,
     ) {
-        if sw == 0 || sh == 0 {
+        if sw == 0 || sh == 0 || screen_w == 0 || screen_h == 0 {
             return;
         }
 
@@ -159,11 +183,29 @@ impl Blitter {
         let copy_h = sh.min(screen_h.saturating_sub(dy));
 
         for sy in 0..copy_h {
-            let dst_row = (dy + sy) * screen_w;
-            let src_row = sy * sw;
+            let y = dy + sy;
+            if y >= screen_h {
+                break;
+            }
 
-            for sx in 0..copy_w {
-                dst[dst_row + (dx + sx)] = src[src_row + sx];
+            let dst_row = y * screen_w;
+            if dst_row >= dst.len() {
+                break;
+            }
+
+            let src_row = sy * sw;
+            if src_row >= src.len() {
+                break;
+            }
+
+            let max_sx_by_dst = dst.len().saturating_sub(dst_row + dx);
+            let max_sx_by_src = src.len().saturating_sub(src_row);
+            let safe_copy_w = copy_w.min(max_sx_by_dst).min(max_sx_by_src);
+
+            for sx in 0..safe_copy_w {
+                let dst_idx = dst_row + dx + sx;
+                let src_idx = src_row + sx;
+                dst[dst_idx] = src[src_idx];
             }
         }
     }
@@ -189,7 +231,7 @@ impl Blitter {
         screen_w: usize,
         screen_h: usize,
     ) {
-        if sw == 0 || sh == 0 {
+        if sw == 0 || sh == 0 || screen_w == 0 || screen_h == 0 {
             return;
         }
 
@@ -201,12 +243,28 @@ impl Blitter {
         let copy_h = sh.min(screen_h.saturating_sub(dy));
 
         for sy in 0..copy_h {
-            let dst_row = (dy + sy) * screen_w;
-            let src_row = sy * sw;
+            let y = dy + sy;
+            if y >= screen_h {
+                break;
+            }
 
-            for sx in 0..copy_w {
+            let dst_row = y * screen_w;
+            if dst_row >= dst.len() {
+                break;
+            }
+
+            let src_row = sy * sw;
+            if src_row >= src.len() {
+                break;
+            }
+
+            let max_sx_by_dst = dst.len().saturating_sub(dst_row + dx);
+            let max_sx_by_src = src.len().saturating_sub(src_row);
+            let safe_copy_w = copy_w.min(max_sx_by_dst).min(max_sx_by_src);
+
+            for sx in 0..safe_copy_w {
                 let src_px = src[src_row + sx];
-                let dst_idx = dst_row + (dx + sx);
+                let dst_idx = dst_row + dx + sx;
 
                 let a = ((src_px >> 24) & 0xFF) as u8;
 
@@ -245,7 +303,10 @@ impl Blitter {
                 let xu = x0 as usize;
                 let yu = y0 as usize;
                 if xu < self.width && yu < self.height {
-                    dst[yu * self.width + xu] = color;
+                    let idx = yu * self.width + xu;
+                    if idx < dst.len() {
+                        dst[idx] = color;
+                    }
                 }
             }
 
