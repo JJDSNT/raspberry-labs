@@ -5,7 +5,7 @@
 //
 // Suporta nomes curtos (8.3) e longos (LFN, comparação case-insensitive ASCII).
 
-use crate::platform::raspi3::emmc;
+use crate::drivers::sdcard as emmc;
 
 const BLOCK: usize = 512;
 

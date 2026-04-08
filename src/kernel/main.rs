@@ -97,7 +97,7 @@ pub fn kernel_main(info: &BootInfo) -> ! {
     spawn_runtime_self_test();
 
     // Periféricos de armazenamento e I/O
-    crate::platform::raspi3::emmc::init();
+    crate::drivers::sdcard::init();
     #[cfg(not(target_os = "uefi"))]
     crate::drivers::usb::init();
 
