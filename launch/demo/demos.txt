@@ -2,6 +2,7 @@
 
 Omega KS1.2|Emulador Amiga|omega|kick12
 Omega AROS|Emulador Amiga — AROS ROM (livre)|omega|aros.rom
+Audio Test|Teste de áudio PCM/I2S → HDMI (osciloscópio + notas)|audiotest
 Juggler|Raytracer clássico Amiga — esferas reflectivas|juggler
 Gfx3D Triangle|Teste inicial de pipeline 3D (software renderer)|gfx3d_triangle
 Sprite Bouncer|Demo de sprite com bounce|sprite_bouncer

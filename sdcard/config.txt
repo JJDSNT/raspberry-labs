@@ -7,3 +7,9 @@ init_uart_clock=48000000
 dtoverlay=disable-bt
 # opcional para log mais cedo do firmware:
 uart_2ndstage=1
+
+# Audio HDMI — necessário para saida de som via HDMI
+# hdmi_drive=2: forcaa modo HDMI com audio (sem isso o RPi pode usar DVI que nao tem audio)
+# hdmi_ignore_edid_audio=1: ignora restricoes de audio anunciadas pelo monitor
+hdmi_drive=2
+hdmi_ignore_edid_audio=1
