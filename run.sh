@@ -16,6 +16,7 @@ CLEAN_FULL=0
 BIG_ENDIAN=0
 CREATE_SD=0
 UEFI_MODE=0
+TFTP_SD=0
 
 DISKS_DIR="./disks"
 OUT_DIR="./out"
@@ -29,12 +30,14 @@ FIRMWARE_BASE="https://github.com/raspberrypi/firmware/raw/master/boot"
 FIRMWARE_FILES="bootcode.bin start.elf fixup.dat bcm2710-rpi-3-b.dtb"
 
 usage() {
-    echo "Usage: $0 [-b] [-c] [-C] [-s] [-u]"
+    echo "Usage: $0 [-b] [-c] [-C] [-s] [-u] [-T]"
     echo "  -b    build big-endian (requer cargo nightly)"
     echo "  -c    limpeza leve (remove kernel gerado e artefatos temporários)"
     echo "  -C    limpeza total (cargo clean)"
     echo "  -s    cria/atualiza sdcard.img bare-metal (QEMU e SD card físico)"
     echo "  -u    cria/atualiza sdcard.img UEFI — pftf/RPi3 (implica -s, sem QEMU)"
+    echo "  -T    cria sdcard.img com U-Boot para boot via TFTP (sem QEMU)"
+    echo "        Requer firmware/u-boot.bin — veja notes/tftp.md"
     echo ""
     echo "Overrides em $SDCARD_OVERRIDES/:"
     echo "  cmdline.txt  — kernel cmdline bare-metal (padrão: demo=flame)"
@@ -43,13 +46,14 @@ usage() {
     exit 1
 }
 
-while getopts "bcCsuh" opt; do
+while getopts "bcCsuTh" opt; do
     case $opt in
         b) BIG_ENDIAN=1 ;;
         c) CLEAN_LIGHT=1 ;;
         C) CLEAN_FULL=1 ;;
         s) CREATE_SD=1 ;;
         u) UEFI_MODE=1 ; CREATE_SD=1 ;;
+        T) TFTP_SD=1 ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -282,6 +286,86 @@ EOF
     echo "     Hardware: sudo dd if=sdcard.img of=/dev/sdX bs=4M status=progress && sync"
     echo ""
 }
+
+# ---------------------------------------------------------------------------
+# Modo TFTP: SD card com U-Boot + boot.scr (sem QEMU)
+# ---------------------------------------------------------------------------
+
+create_tftp_sdcard_image() {
+    command -v mcopy  >/dev/null 2>&1 || { echo "[ERROR] mtools não encontrado — sudo apt install mtools"; exit 1; }
+    command -v mformat>/dev/null 2>&1 || { echo "[ERROR] mformat não encontrado — sudo apt install mtools"; exit 1; }
+
+    local UBOOT="$FIRMWARE_DIR/u-boot.bin"
+    if [ ! -f "$UBOOT" ]; then
+        echo "[ERROR] $UBOOT não encontrado."
+        echo "        Veja notes/tftp.md para instruções de obtenção do U-Boot para RPi3B."
+        exit 1
+    fi
+
+    local BOOTSCR="$OUT_DIR/boot.scr"
+    if [ ! -f "$BOOTSCR" ]; then
+        echo "[INFO] out/boot.scr não existe — compilando scripts/boot.cmd..."
+        bash scripts/mkbootscr.sh || {
+            echo "[ERROR] Falha ao gerar boot.scr. Requer: sudo apt install u-boot-tools"
+            exit 1
+        }
+    fi
+
+    download_firmware
+
+    local SIZE_MB=128
+    local TFTP_IMG="$(pwd)/out/sdcard-tftp.img"
+    echo "[SD] Criando $TFTP_IMG (U-Boot TFTP, ${SIZE_MB}MB, FAT32)..."
+    dd if=/dev/zero of="$TFTP_IMG" bs=1M count="$SIZE_MB" status=none
+    mformat -i "$TFTP_IMG" -F -v "RASPI_TFP" ::
+
+    # Firmware RPi (GPU)
+    for f in $FIRMWARE_FILES; do
+        [ -f "$FIRMWARE_DIR/$f" ] && mcopy -i "$TFTP_IMG" "$FIRMWARE_DIR/$f" ::
+    done
+
+    # config.txt — U-Boot como kernel
+    cat > /tmp/rpi_config_tftp.txt << EOF
+arm_64bit=1
+gpu_mem=64
+kernel=u-boot.bin
+device_tree=bcm2710-rpi-3-b.dtb
+enable_uart=1
+init_uart_clock=48000000
+dtoverlay=disable-bt
+uart_2ndstage=1
+hdmi_drive=2
+hdmi_ignore_edid_audio=1
+EOF
+    mcopy -i "$TFTP_IMG" /tmp/rpi_config_tftp.txt "::config.txt"
+
+    # U-Boot
+    echo "[SD] + u-boot.bin ($(du -h "$UBOOT" | cut -f1))"
+    mcopy -i "$TFTP_IMG" "$UBOOT" "::u-boot.bin"
+
+    # boot.scr
+    echo "[SD] + boot.scr"
+    mcopy -i "$TFTP_IMG" "$BOOTSCR" "::boot.scr"
+
+    echo ""
+    echo "[SD] sdcard-tftp.img pronto!"
+    echo "     Este SD card fica gravado permanentemente no RPi."
+    echo "     Grave uma vez: sudo dd if=$TFTP_IMG of=/dev/sdX bs=4M status=progress && sync"
+    echo ""
+    echo "     Workflow de desenvolvimento:"
+    echo "       Terminal A: sudo make tftp-server   (serve out/)"
+    echo "       Terminal B: make le                 (compila kernel)"
+    echo "       RPi: reinicie — baixa e executa o novo kernel automaticamente"
+    echo ""
+    echo "     Edite scripts/boot.cmd para configurar serverip e bootargs."
+    echo "     Após editar: make boot-scr && mcopy out/boot.scr ::  (ou regrave o SD)"
+    echo ""
+}
+
+if [ "$TFTP_SD" -eq 1 ]; then
+    create_tftp_sdcard_image
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Modo UEFI: build + SD card + sair (sem QEMU)

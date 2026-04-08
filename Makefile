@@ -18,7 +18,9 @@ CARGO_NIGHTLY := cargo +nightly
 	le be uefi \
 	aros-rom \
 	aros-sad-le aros-sad-be aros-sad \
-	sdcard sdcard-be sdcard-uefi sdcard-uefi-be \
+	sdcard sdcard-be sdcard-uefi sdcard-uefi-be sdcard-tftp \
+	boot-scr \
+	tftp-server \
 	clean
 
 all: le
@@ -105,6 +107,31 @@ sdcard-uefi:
 
 sdcard-uefi-be:
 	./run.sh -u -b
+
+# SD card com U-Boot para boot via TFTP (grava uma vez no RPi)
+# Requer firmware/u-boot.bin — veja notes/tftp.md
+sdcard-tftp:
+	./run.sh -T
+
+# Compila scripts/boot.cmd → out/boot.scr (requer u-boot-tools)
+boot-scr:
+	bash scripts/mkbootscr.sh
+
+# ------------------------------------------------------------
+# Desenvolvimento via TFTP
+# ------------------------------------------------------------
+
+# Inicia servidor TFTP servindo out/ na porta 69 (requer sudo)
+tftp-server:
+	@echo "[TFTP] Servindo out/ na porta 69..."
+	@echo "[TFTP] Para porta sem root: TFTP_PORT=6969 make tftp-server-noroot"
+	sudo TFTP_ROOT=$(PWD)/out python3 scripts/tftp-server.py
+
+# Inicia servidor TFTP em porta alta (sem root, mas U-Boot precisa da porta configurada)
+tftp-server-noroot:
+	@echo "[TFTP] Servindo out/ na porta 6969 (sem root)"
+	@echo "[TFTP] Configure U-Boot: setenv tftpdstp 6969"
+	TFTP_ROOT=$(PWD)/out TFTP_PORT=6969 python3 scripts/tftp-server.py
 
 # ------------------------------------------------------------
 # Cleanup
