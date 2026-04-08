@@ -1,4 +1,4 @@
-// src/platform/raspi3/peripheral/timer.rs
+// src/platform/raspi3/peripheral/local_intc.rs
 //
 // Registradores do bloco de periféricos locais do BCM2836/BCM2837.
 // Base: 0x4000_0000 (diferente do MMIO principal em 0x3F00_0000)

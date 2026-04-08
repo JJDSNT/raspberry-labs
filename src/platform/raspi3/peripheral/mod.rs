@@ -2,7 +2,10 @@
 
 pub mod gpio;
 pub mod mbox;
-pub mod timer;
+pub mod local_intc;
 pub mod uart;
 pub mod usb;
-// emmc virá quando implementar SD card
+pub mod dma;
+pub mod clock;
+pub mod pcm;
+pub mod sdhci;

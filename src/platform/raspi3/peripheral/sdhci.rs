@@ -1,5 +1,5 @@
-// src/platform/raspi3/emmc.rs
-// Driver polling para o controlador Arasan eMMC do BCM2837.
+// src/platform/raspi3/peripheral/sdhci.rs
+// Driver polling para o controlador Arasan SDHCI/eMMC do BCM2837.
 // Raspberry Pi 3B.
 // Suporta SDSC (byte-addressed) e SDHC/SDXC (block-addressed).
 
@@ -11,24 +11,24 @@ use crate::platform::raspi3::{mailbox, mmio};
 // Endereços base
 // ---------------------------------------------------------------------------
 
-const EMMC_BASE: usize = 0x3F30_0000;
+const SDHCI_BASE: usize = 0x3F30_0000;
 const GPIO_BASE: usize = 0x3F20_0000;
 
-// EMMC registers
-const EMMC_BLKSIZECNT: usize = EMMC_BASE + 0x04;
-const EMMC_ARG1: usize       = EMMC_BASE + 0x08;
-const EMMC_CMDTM: usize      = EMMC_BASE + 0x0C;
-const EMMC_RESP0: usize      = EMMC_BASE + 0x10;
-const EMMC_RESP1: usize      = EMMC_BASE + 0x14;
-const EMMC_RESP2: usize      = EMMC_BASE + 0x18;
-const EMMC_RESP3: usize      = EMMC_BASE + 0x1C;
-const EMMC_DATA: usize       = EMMC_BASE + 0x20;
-const EMMC_STATUS: usize     = EMMC_BASE + 0x24;
-const EMMC_CONTROL0: usize   = EMMC_BASE + 0x28;
-const EMMC_CONTROL1: usize   = EMMC_BASE + 0x2C;
-const EMMC_INTERRUPT: usize  = EMMC_BASE + 0x30;
-const EMMC_IRPT_MASK: usize  = EMMC_BASE + 0x34;
-const EMMC_IRPT_EN: usize    = EMMC_BASE + 0x38;
+// SDHCI registers
+const SDHCI_BLKSIZECNT: usize = SDHCI_BASE + 0x04;
+const SDHCI_ARG1: usize       = SDHCI_BASE + 0x08;
+const SDHCI_CMDTM: usize      = SDHCI_BASE + 0x0C;
+const SDHCI_RESP0: usize      = SDHCI_BASE + 0x10;
+const SDHCI_RESP1: usize      = SDHCI_BASE + 0x14;
+const SDHCI_RESP2: usize      = SDHCI_BASE + 0x18;
+const SDHCI_RESP3: usize      = SDHCI_BASE + 0x1C;
+const SDHCI_DATA: usize       = SDHCI_BASE + 0x20;
+const SDHCI_STATUS: usize     = SDHCI_BASE + 0x24;
+const SDHCI_CONTROL0: usize   = SDHCI_BASE + 0x28;
+const SDHCI_CONTROL1: usize   = SDHCI_BASE + 0x2C;
+const SDHCI_INTERRUPT: usize  = SDHCI_BASE + 0x30;
+const SDHCI_IRPT_MASK: usize  = SDHCI_BASE + 0x34;
+const SDHCI_IRPT_EN: usize    = SDHCI_BASE + 0x38;
 
 // GPIO
 const GPIO_GPFSEL4: usize = GPIO_BASE + 0x10;
@@ -120,12 +120,12 @@ const SD_ACMD41: u32 = 41 << 24 | CMD_RSPNS_48;
 // Estado global
 // ---------------------------------------------------------------------------
 
-struct EmmcState {
+struct SdState {
     rca: u32,
     is_sdhc: bool,
 }
 
-static STATE: IrqSafeSpinLock<Option<EmmcState>> = IrqSafeSpinLock::new(None);
+static STATE: IrqSafeSpinLock<Option<SdState>> = IrqSafeSpinLock::new(None);
 
 // ---------------------------------------------------------------------------
 // Utilitários
@@ -177,10 +177,10 @@ fn interrupt_error_string(v: u32) -> &'static str {
 }
 
 fn reset_cmd_circuit() {
-    let c1 = mmio::read(EMMC_CONTROL1);
-    mmio::write(EMMC_CONTROL1, c1 | C1_SRST_CMD);
+    let c1 = mmio::read(SDHCI_CONTROL1);
+    mmio::write(SDHCI_CONTROL1, c1 | C1_SRST_CMD);
     for _ in 0..1000u32 {
-        if mmio::read(EMMC_CONTROL1) & C1_SRST_CMD == 0 {
+        if mmio::read(SDHCI_CONTROL1) & C1_SRST_CMD == 0 {
             break;
         }
         delay_nop(10);
@@ -188,10 +188,10 @@ fn reset_cmd_circuit() {
 }
 
 fn reset_data_circuit() {
-    let c1 = mmio::read(EMMC_CONTROL1);
-    mmio::write(EMMC_CONTROL1, c1 | C1_SRST_DATA);
+    let c1 = mmio::read(SDHCI_CONTROL1);
+    mmio::write(SDHCI_CONTROL1, c1 | C1_SRST_DATA);
     for _ in 0..1000u32 {
-        if mmio::read(EMMC_CONTROL1) & C1_SRST_DATA == 0 {
+        if mmio::read(SDHCI_CONTROL1) & C1_SRST_DATA == 0 {
             break;
         }
         delay_nop(10);
@@ -200,29 +200,29 @@ fn reset_data_circuit() {
 
 fn wait_interrupt(mask: u32) -> Result<u32, &'static str> {
     for _ in 0..500_000u32 {
-        let raw = mmio::read(EMMC_INTERRUPT);
+        let raw = mmio::read(SDHCI_INTERRUPT);
 
         if raw & INT_CARD != 0 {
-            mmio::write(EMMC_INTERRUPT, INT_CARD);
+            mmio::write(SDHCI_INTERRUPT, INT_CARD);
         }
         let v = raw & !INT_CARD;
 
         if v & INT_ERR_MASK != 0 {
-            mmio::write(EMMC_INTERRUPT, v & INT_ERR_MASK);
+            mmio::write(SDHCI_INTERRUPT, v & INT_ERR_MASK);
             reset_cmd_circuit();
             reset_data_circuit();
             return Err(interrupt_error_string(v));
         }
 
         if v & mask != 0 {
-            mmio::write(EMMC_INTERRUPT, v & mask);
+            mmio::write(SDHCI_INTERRUPT, v & mask);
             return Ok(v);
         }
 
         delay_nop(10);
     }
 
-    mmio::write(EMMC_INTERRUPT, 0xFFFF_FFFF);
+    mmio::write(SDHCI_INTERRUPT, 0xFFFF_FFFF);
     reset_cmd_circuit();
     reset_data_circuit();
     Err("timeout")
@@ -243,7 +243,7 @@ fn gpio_setup() {
     // Não mexer em GPPUD/GPPUDCLK no Pi 3B durante o bring-up.
 }
 
-fn emmc_base_clock() -> u32 {
+fn sdhci_base_clock() -> u32 {
     #[repr(align(16))]
     struct Buf([u32; 8]);
 
@@ -253,60 +253,60 @@ fn emmc_base_clock() -> u32 {
 }
 
 fn set_clock(base_hz: u32, target_hz: u32) -> bool {
-    if !wait_mask(EMMC_STATUS, SR_CMD_INHIBIT | SR_DAT_INHIBIT, 0) {
+    if !wait_mask(SDHCI_STATUS, SR_CMD_INHIBIT | SR_DAT_INHIBIT, 0) {
         return false;
     }
 
-    let c1 = mmio::read(EMMC_CONTROL1) & !C1_CLK_EN;
-    mmio::write(EMMC_CONTROL1, c1);
+    let c1 = mmio::read(SDHCI_CONTROL1) & !C1_CLK_EN;
+    mmio::write(SDHCI_CONTROL1, c1);
     delay_nop(300);
 
     let divisor = ((base_hz + 2 * target_hz - 1) / (2 * target_hz)).clamp(1, 0x3FF);
     let cdiv = ((divisor & 0xFF) << 8) | ((divisor >> 8) << 6);
 
     mmio::write(
-        EMMC_CONTROL1,
+        SDHCI_CONTROL1,
         (c1 & !0xFFE0) | cdiv | C1_CLK_INTLEN | C1_TOUNIT_MAX,
     );
     delay_nop(300);
 
-    if !wait_mask(EMMC_CONTROL1, C1_CLK_STABLE, C1_CLK_STABLE) {
+    if !wait_mask(SDHCI_CONTROL1, C1_CLK_STABLE, C1_CLK_STABLE) {
         return false;
     }
 
-    let c1 = mmio::read(EMMC_CONTROL1);
-    mmio::write(EMMC_CONTROL1, c1 | C1_CLK_EN);
+    let c1 = mmio::read(SDHCI_CONTROL1);
+    mmio::write(SDHCI_CONTROL1, c1 | C1_CLK_EN);
     delay_nop(300);
     true
 }
 
 fn send_cmd(cmd: u32, arg: u32) -> Option<[u32; 4]> {
-    if !wait_mask(EMMC_STATUS, SR_CMD_INHIBIT, 0) {
-        crate::log!("EMMC", "cmd inhibit timeout");
+    if !wait_mask(SDHCI_STATUS, SR_CMD_INHIBIT, 0) {
+        crate::log!("SDHCI", "cmd inhibit timeout");
         return None;
     }
 
     if cmd & CMD_ISDATA != 0 {
-        if !wait_mask(EMMC_STATUS, SR_DAT_INHIBIT, 0) {
-            crate::log!("EMMC", "data inhibit timeout");
+        if !wait_mask(SDHCI_STATUS, SR_DAT_INHIBIT, 0) {
+            crate::log!("SDHCI", "data inhibit timeout");
             return None;
         }
     }
 
-    mmio::write(EMMC_INTERRUPT, 0xFFFF_FFFF);
-    mmio::write(EMMC_ARG1, arg);
-    mmio::write(EMMC_CMDTM, cmd);
+    mmio::write(SDHCI_INTERRUPT, 0xFFFF_FFFF);
+    mmio::write(SDHCI_ARG1, arg);
+    mmio::write(SDHCI_CMDTM, cmd);
 
     if let Err(e) = wait_interrupt(INT_CMD_DONE) {
-        crate::log!("EMMC", "cmd failed: {}", e);
+        crate::log!("SDHCI", "cmd failed: {}", e);
         return None;
     }
 
     Some([
-        mmio::read(EMMC_RESP0),
-        mmio::read(EMMC_RESP1),
-        mmio::read(EMMC_RESP2),
-        mmio::read(EMMC_RESP3),
+        mmio::read(SDHCI_RESP0),
+        mmio::read(SDHCI_RESP1),
+        mmio::read(SDHCI_RESP2),
+        mmio::read(SDHCI_RESP3),
     ])
 }
 
@@ -326,30 +326,30 @@ pub fn init() -> bool {
 
     gpio_setup();
 
-    let base_hz = emmc_base_clock();
-    crate::log!("EMMC", "base clock {}Hz", base_hz);
+    let base_hz = sdhci_base_clock();
+    crate::log!("SDHCI", "base clock {}Hz", base_hz);
 
-    mmio::write(EMMC_CONTROL0, 0);
-    mmio::write(EMMC_CONTROL1, C1_SRST_HC);
-    if !wait_mask(EMMC_CONTROL1, C1_SRST_HC, 0) {
-        crate::log!("EMMC", "reset timeout");
+    mmio::write(SDHCI_CONTROL0, 0);
+    mmio::write(SDHCI_CONTROL1, C1_SRST_HC);
+    if !wait_mask(SDHCI_CONTROL1, C1_SRST_HC, 0) {
+        crate::log!("SDHCI", "reset timeout");
         return false;
     }
 
-    mmio::write(EMMC_CONTROL1, C1_CLK_INTLEN | C1_TOUNIT_MAX);
+    mmio::write(SDHCI_CONTROL1, C1_CLK_INTLEN | C1_TOUNIT_MAX);
     delay_nop(300);
 
-    if !wait_mask(EMMC_CONTROL1, C1_CLK_STABLE, C1_CLK_STABLE) {
-        crate::log!("EMMC", "clock unstable");
+    if !wait_mask(SDHCI_CONTROL1, C1_CLK_STABLE, C1_CLK_STABLE) {
+        crate::log!("SDHCI", "clock unstable");
         return false;
     }
 
-    mmio::write(EMMC_IRPT_EN, 0);
-    mmio::write(EMMC_IRPT_MASK, 0xFFFF_FFFF);
-    mmio::write(EMMC_INTERRUPT, 0xFFFF_FFFF);
+    mmio::write(SDHCI_IRPT_EN, 0);
+    mmio::write(SDHCI_IRPT_MASK, 0xFFFF_FFFF);
+    mmio::write(SDHCI_INTERRUPT, 0xFFFF_FFFF);
 
     if !set_clock(base_hz, 400_000) {
-        crate::log!("EMMC", "set clock failed");
+        crate::log!("SDHCI", "set clock failed");
         return false;
     }
 
@@ -374,54 +374,55 @@ pub fn init() -> bool {
     }
 
     if ocr & (1 << 31) == 0 {
-        crate::log!("EMMC", "ACMD41 timeout");
+        crate::log!("SDHCI", "ACMD41 timeout");
         return false;
     }
 
     let is_sdhc = is_v2 && (ocr & (1 << 30) != 0);
-    crate::log!("EMMC", "OCR={:#x} sdhc={}", ocr, is_sdhc);
+    crate::log!("SDHCI", "OCR={:#x} sdhc={}", ocr, is_sdhc);
 
     if send_cmd(SD_CMD2, 0).is_none() {
-        crate::log!("EMMC", "CMD2 failed");
+        crate::log!("SDHCI", "CMD2 failed");
         return false;
     }
 
     let rca = match send_cmd(SD_CMD3, 0) {
         Some(r) => (r[0] >> 16) & 0xFFFF,
         None => {
-            crate::log!("EMMC", "CMD3 failed");
+            crate::log!("SDHCI", "CMD3 failed");
             return false;
         }
     };
-    crate::log!("EMMC", "RCA={:#x}", rca);
+    crate::log!("SDHCI", "RCA={:#x}", rca);
 
     if !set_clock(base_hz, 400_000) {
-        crate::log!("EMMC", "transfer clock failed");
+        crate::log!("SDHCI", "transfer clock failed");
         return false;
     }
 
     if send_cmd(SD_CMD7, rca << 16).is_none() {
-        crate::log!("EMMC", "CMD7 failed");
+        crate::log!("SDHCI", "CMD7 failed");
         return false;
     }
 
-    if !wait_mask(EMMC_STATUS, SR_DAT_INHIBIT, 0) {
-        crate::log!("EMMC", "CMD7 busy timeout");
+    if !wait_mask(SDHCI_STATUS, SR_DAT_INHIBIT, 0) {
+        crate::log!("SDHCI", "CMD7 busy timeout");
         return false;
     }
 
     if !is_sdhc {
         if send_cmd(SD_CMD16, 512).is_none() {
-            crate::log!("EMMC", "CMD16 failed");
+            crate::log!("SDHCI", "CMD16 failed");
             return false;
         }
     }
 
-    let c0 = mmio::read(EMMC_CONTROL0);
-    mmio::write(EMMC_CONTROL0, c0 & !C0_HCTL_DWIDTH);
+    // Força 1-bit durante bring-up
+    let c0 = mmio::read(SDHCI_CONTROL0);
+    mmio::write(SDHCI_CONTROL0, c0 & !C0_HCTL_DWIDTH);
 
-    *STATE.lock() = Some(EmmcState { rca, is_sdhc });
-    crate::log!("EMMC", "initialized ok");
+    *STATE.lock() = Some(SdState { rca, is_sdhc });
+    crate::log!("SDHCI", "initialized ok");
     true
 }
 
@@ -430,13 +431,16 @@ pub fn init() -> bool {
 // ---------------------------------------------------------------------------
 
 pub fn read_blocks(lba: u32, buf: &mut [u8]) -> bool {
-    assert!(buf.len() % 512 == 0, "buf não é múltiplo de 512");
+    if buf.len() % 512 != 0 {
+        crate::log!("SDHCI", "buffer not multiple of 512");
+        return false;
+    }
 
     let state = STATE.lock();
     let st = match state.as_ref() {
         Some(s) => s,
         None => {
-            crate::log!("EMMC", "not initialized");
+            crate::log!("SDHCI", "not initialized");
             return false;
         }
     };
@@ -445,28 +449,28 @@ pub fn read_blocks(lba: u32, buf: &mut [u8]) -> bool {
     let addr = if st.is_sdhc { lba } else { lba * 512 };
     let cmd = if block_count == 1 { SD_CMD17 } else { SD_CMD18 };
 
-    if !wait_mask(EMMC_STATUS, SR_CMD_INHIBIT | SR_DAT_INHIBIT, 0) {
-        crate::log!("EMMC", "controller busy");
+    if !wait_mask(SDHCI_STATUS, SR_CMD_INHIBIT | SR_DAT_INHIBIT, 0) {
+        crate::log!("SDHCI", "controller busy");
         return false;
     }
 
-    mmio::write(EMMC_INTERRUPT, 0xFFFF_FFFF);
-    mmio::write(EMMC_BLKSIZECNT, (block_count << 16) | 512);
+    mmio::write(SDHCI_INTERRUPT, 0xFFFF_FFFF);
+    mmio::write(SDHCI_BLKSIZECNT, (block_count << 16) | 512);
 
     if send_cmd(cmd, addr).is_none() {
-        crate::log!("EMMC", "read cmd failed");
+        crate::log!("SDHCI", "read cmd failed");
         return false;
     }
 
     for blk in 0..block_count as usize {
         if wait_interrupt(INT_READ_RDY).is_err() {
-            crate::log!("EMMC", "read timeout");
+            crate::log!("SDHCI", "read timeout");
             return false;
         }
 
         let base = blk * 512;
         for i in 0..128usize {
-            let w = mmio::read(EMMC_DATA);
+            let w = mmio::read(SDHCI_DATA);
             let off = base + i * 4;
             buf[off]     = (w & 0xFF) as u8;
             buf[off + 1] = ((w >> 8) & 0xFF) as u8;
@@ -477,7 +481,7 @@ pub fn read_blocks(lba: u32, buf: &mut [u8]) -> bool {
 
     if block_count > 1 {
         if wait_interrupt(INT_DATA_DONE).is_err() {
-            crate::log!("EMMC", "data done timeout");
+            crate::log!("SDHCI", "data done timeout");
             return false;
         }
     }
