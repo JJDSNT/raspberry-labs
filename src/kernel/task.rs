@@ -3,7 +3,7 @@
 use crate::arch::aarch64::exception::ExceptionContext;
 
 pub const MAX_TASKS: usize = 8;
-pub const TASK_STACK_SIZE: usize = 16 * 1024;
+pub const TASK_STACK_SIZE: usize = 256 * 1024; // 256KB — enough for large demo structs (Tunnel ~100KB, Parallax ~64KB) + Renderer (~6KB) + overhead
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskState {
