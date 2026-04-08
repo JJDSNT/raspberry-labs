@@ -82,6 +82,7 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
 
 fn run_renderer_demo<D: Demo>(fb: Framebuffer, mut demo: D) -> ! {
     let mut renderer = Renderer::new(fb);
+    crate::log!("DEMO", "renderer ok pixels={} {}x{}", renderer.pixels(), renderer.width(), renderer.height());
     let ticks_per_second = time::ticks_per_second();
     assert!(ticks_per_second != 0, "kernel time not initialized");
 
