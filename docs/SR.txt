@@ -1,0 +1,15 @@
+bit 15    T   — trace (single step)
+bit 14    —   reservado
+bit 13    S   — supervisor mode
+bit 12    —   reservado  
+bit 11    —   reservado
+bits 10-8 I2·I1·I0 — IRQ mask (níveis 0-7)
+bit  7    —   reservado
+bit  6    —   reservado
+bit  5    —   reservado
+bit  4    X   — extend (carry estendido)
+bit  3    N   — negative
+bit  2    Z   — zero
+bit  1    V   — overflow
+bit  0    C   — carry
+bits 31-16    reservados — extensões futuras

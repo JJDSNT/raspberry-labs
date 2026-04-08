@@ -1,0 +1,44 @@
+MC68k-64 Architecture Specification
+│
+├── 00-overview.md
+│     visão geral, filosofia, inspirações
+│     referências cruzadas entre documentos
+│
+├── 01-registers.md          ← já temos conteúdo fechado
+│     GPRs, controle, CSRs, FP
+│     SR bit layout completo
+│
+├── 02-memory-model.md       ← já temos conteúdo fechado
+│     espaço de endereçamento
+│     alinhamento, endianness
+│     tipos de região, DMA/MMU
+│
+├── 03-instruction-encoding.md  ← acabamos de fechar
+│     envelope 32-bit
+│     classes e layouts
+│     modos de endereçamento
+│     extensões
+│
+├── 04-instruction-set.md    ← próximo passo
+│     cada instrução com semântica formal
+│     efeitos no CCR
+│     exemplos de encoding
+│
+├── 05-exception-model.md    ← a fazer
+│     vetores, stack frame
+│     fluxo de entrada/saída de exceção
+│     níveis de IRQ
+│     CSRs de exceção
+│
+├── 06-privilege-model.md    ← a fazer
+│     user vs supervisor
+│     transições, proteções
+│
+├── 07-memory-map.md         ← a fazer
+│     regiões do espaço de endereçamento
+│     MMIO, Zorro, chipset
+│     layout de vetores
+│
+└── 08-future.md             ← a fazer
+      MMU, atomics, SMP, JIT
+      decisões adiadas e por quê
