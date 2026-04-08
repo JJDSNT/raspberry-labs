@@ -1,5 +1,6 @@
 // src/demos/mod.rs
 
+pub mod audio_test;
 pub mod flame;
 pub mod starfield;
 pub mod plasma;
@@ -22,6 +23,7 @@ pub trait Demo {
 
 #[derive(Clone, Copy, Debug)]
 pub enum DemoKind {
+    AudioTest,
     RasterBars,
     Plasma,
     Flame,
@@ -30,13 +32,14 @@ pub enum DemoKind {
     Parallax,
     Juggler,
     SpriteBouncer,
-    Gfx3dTriangle, // 🔥 novo
+    Gfx3dTriangle,
     Omega,
 }
 
 impl DemoKind {
     pub const fn as_str(&self) -> &'static str {
         match self {
+            DemoKind::AudioTest     => "AudioTest",
             DemoKind::RasterBars    => "RasterBars",
             DemoKind::Plasma        => "Plasma",
             DemoKind::Flame         => "Flame",
@@ -45,7 +48,7 @@ impl DemoKind {
             DemoKind::Parallax      => "Parallax",
             DemoKind::Juggler       => "Juggler",
             DemoKind::SpriteBouncer => "SpriteBouncer",
-            DemoKind::Gfx3dTriangle => "Gfx3dTriangle", // 🔥 novo
+            DemoKind::Gfx3dTriangle => "Gfx3dTriangle",
             DemoKind::Omega         => "Omega",
         }
     }
@@ -59,6 +62,7 @@ pub fn run_demo(kind: DemoKind, fb: Framebuffer) -> ! {
     crate::log!("DEMO", "run_demo kind={}", kind.as_str());
 
     match kind {
+        DemoKind::AudioTest     => run_renderer_demo(fb, audio_test::AudioTestDemo::new()),
         DemoKind::RasterBars    => run_renderer_demo(fb, rasterbars::RasterBarsDemo::new()),
         DemoKind::Plasma        => run_renderer_demo(fb, plasma::Plasma::new()),
         DemoKind::Flame         => run_renderer_demo(fb, flame::FlameDemo::new()),

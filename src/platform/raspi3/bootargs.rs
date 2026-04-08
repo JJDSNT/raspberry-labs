@@ -55,6 +55,7 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarg
                     "smpte" => BootTarget::Diag(DiagKind::Smpte),
 
                     // demos
+                    "audiotest"  => BootTarget::Demo(DemoKind::AudioTest),
                     "rasterbars" => BootTarget::Demo(DemoKind::RasterBars),
                     "plasma" => BootTarget::Demo(DemoKind::Plasma),
                     "flame" => BootTarget::Demo(DemoKind::Flame),
