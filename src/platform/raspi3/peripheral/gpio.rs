@@ -1,7 +1,6 @@
 // src/platform/raspi3/peripheral/gpio.rs
 //
 // Registradores GPIO do BCM2837 (Raspberry Pi 3).
-// Necessário para configurar pinos do UART, SD card, USB, etc.
 //
 
 pub const BASE: usize = 0x3F20_0000;
@@ -20,10 +19,10 @@ pub const GPSET1: usize = BASE + 0x20;
 pub const GPCLR0: usize = BASE + 0x28;
 pub const GPCLR1: usize = BASE + 0x2C;
 
-// Pull-up/down (legado BCM2835 — ainda usado no Pi 3)
-pub const GPPUD:     usize = BASE + 0xE4;
-pub const GPPUDCLK0: usize = BASE + 0xF0;
-pub const GPPUDCLK1: usize = BASE + 0xF4;
+// Pull-up/down legado BCM2835/BCM2837
+pub const GPPUD:     usize = BASE + 0x94;
+pub const GPPUDCLK0: usize = BASE + 0x98;
+pub const GPPUDCLK1: usize = BASE + 0x9C;
 
 // Valores de function select
 pub const FSEL_INPUT:  u32 = 0b000;
