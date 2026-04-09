@@ -9,6 +9,7 @@ use crate::platform::raspi3::bootargs;
 extern "C" {
     fn omega_init();
     fn omega_run_frame();
+    fn omega_attach_hdf(path: *const u8) -> i32;
     fn FloppyInsert(number: i32, adf: *mut u8);
     fn omega_probe_dump(last_n: u32);
 }
@@ -27,8 +28,8 @@ const DF1_ADDR: usize = 0x0210_0000; // 33 MB mark
 // Buffer para ROM carregada do SD card.
 // 1 MB para acomodar AROS (ext 512KB + main 512KB concatenados);
 // Kickstart 1.2 / 1.3 usa apenas os primeiros 512 KB.
-const ROM_SIZE:  usize = 1024 * 1024;
-const ROM_ADDR:  usize = 0x0220_0000; // 34 MB mark
+const ROM_SIZE: usize = 1024 * 1024;
+const ROM_ADDR: usize = 0x0220_0000; // 34 MB mark
 
 pub struct OmegaEmu {
     _private: (),
@@ -60,6 +61,36 @@ fn read_adf(drive: i32, name: &str, addr: usize) -> bool {
     }
 }
 
+/// Converte &str para C string temporária em stack/local buffer.
+/// Retorna ponteiro para buffer terminado em NUL, ou None se não couber
+/// ou se contiver NUL embutido.
+fn with_c_path<F, R>(path: &str, f: F) -> Option<R>
+where
+    F: FnOnce(*const u8) -> R,
+{
+    const MAX_PATH: usize = 256;
+
+    if path.is_empty() || path.len() >= MAX_PATH {
+        return None;
+    }
+
+    let bytes = path.as_bytes();
+
+    for &b in bytes {
+        if b == 0 {
+            return None;
+        }
+    }
+
+    let mut buf = [0u8; MAX_PATH];
+    let len = bytes.len();
+
+    buf[..len].copy_from_slice(bytes);
+    buf[len] = 0;
+
+    Some(f(buf.as_ptr()))
+}
+
 /// Ponto de entrada principal — chamado por run_demo() com o framebuffer real.
 pub fn run(fb: Framebuffer) -> ! {
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
@@ -84,7 +115,24 @@ pub fn run(fb: Framebuffer) -> ! {
     // 2. Inicializa o emulador: carrega ROM, inicializa chipset e slots de disco.
     let mut emu = OmegaEmu::new();
 
-    // 3. Lê ADFs do SD e insere nos slots — após FloppyInit(), ordem natural.
+    // 3. Anexa HDF após omega_init(), antes do loop principal.
+    if let Some(name) = bootargs::hd0() {
+        crate::log!("EMU", "hd0: attaching '{}'", name);
+
+        match with_c_path(name, |ptr| unsafe { omega_attach_hdf(ptr) }) {
+            Some(0) => {
+                crate::log!("EMU", "hd0: attached");
+            }
+            Some(rc) => {
+                crate::log!("EMU", "hd0: attach failed rc={}", rc);
+            }
+            None => {
+                crate::log!("EMU", "hd0: invalid path");
+            }
+        }
+    }
+
+    // 4. Lê ADFs do SD e insere nos slots — após FloppyInit(), ordem natural.
     //    EMMC já foi inicializado em kernel_main; read_blocks falha silenciosamente
     //    se o controlador não estiver disponível.
     if let Some(name) = bootargs::df0() {
@@ -98,7 +146,7 @@ pub fn run(fb: Framebuffer) -> ! {
         }
     }
 
-    // 4. Spawna USB após o SD para evitar contenção de IRQ durante a leitura.
+    // 5. Spawna USB após o SD para evitar contenção de IRQ durante a leitura.
     let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
 
     loop {
