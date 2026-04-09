@@ -13,8 +13,13 @@ use core::sync::atomic::AtomicUsize;
 
 static DF0_PTR: AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
 static DF0_LEN: AtomicUsize    = AtomicUsize::new(0);
+
 static DF1_PTR: AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
 static DF1_LEN: AtomicUsize    = AtomicUsize::new(0);
+
+static HD0_PTR: AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
+static HD0_LEN: AtomicUsize    = AtomicUsize::new(0);
+
 static ROM_PTR: AtomicPtr<u8>  = AtomicPtr::new(core::ptr::null_mut());
 static ROM_LEN: AtomicUsize    = AtomicUsize::new(0);
 
@@ -26,12 +31,15 @@ fn store_str(ptr: &AtomicPtr<u8>, len: &AtomicUsize, s: &'static str) {
 fn load_str(ptr: &AtomicPtr<u8>, len: &AtomicUsize) -> Option<&'static str> {
     let p = ptr.load(Ordering::Relaxed);
     let l = len.load(Ordering::Relaxed);
-    if p.is_null() || l == 0 { return None; }
+    if p.is_null() || l == 0 {
+        return None;
+    }
     Some(unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(p, l)) })
 }
 
 pub fn df0() -> Option<&'static str> { load_str(&DF0_PTR, &DF0_LEN) }
 pub fn df1() -> Option<&'static str> { load_str(&DF1_PTR, &DF1_LEN) }
+pub fn hd0() -> Option<&'static str> { load_str(&HD0_PTR, &HD0_LEN) }
 pub fn rom() -> Option<&'static str> { load_str(&ROM_PTR, &ROM_LEN) }
 
 #[derive(Clone, Copy, Debug)]
@@ -55,17 +63,17 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarg
                     "smpte" => BootTarget::Diag(DiagKind::Smpte),
 
                     // demos
-                    "audiotest"  => BootTarget::Demo(DemoKind::AudioTest),
-                    "rasterbars" => BootTarget::Demo(DemoKind::RasterBars),
-                    "plasma" => BootTarget::Demo(DemoKind::Plasma),
-                    "flame" => BootTarget::Demo(DemoKind::Flame),
-                    "starfield" => BootTarget::Demo(DemoKind::Starfield),
-                    "tunnel" => BootTarget::Demo(DemoKind::Tunnel),
-                    "parallax" => BootTarget::Demo(DemoKind::Parallax),
-                    "juggler" => BootTarget::Demo(DemoKind::Juggler),
-                    "sprite_bouncer" => BootTarget::Demo(DemoKind::SpriteBouncer),
-                    "gfx3d_triangle" => BootTarget::Demo(DemoKind::Gfx3dTriangle),
-                    "omega"          => BootTarget::Demo(DemoKind::Omega),
+                    "audiotest"       => BootTarget::Demo(DemoKind::AudioTest),
+                    "rasterbars"      => BootTarget::Demo(DemoKind::RasterBars),
+                    "plasma"          => BootTarget::Demo(DemoKind::Plasma),
+                    "flame"           => BootTarget::Demo(DemoKind::Flame),
+                    "starfield"       => BootTarget::Demo(DemoKind::Starfield),
+                    "tunnel"          => BootTarget::Demo(DemoKind::Tunnel),
+                    "parallax"        => BootTarget::Demo(DemoKind::Parallax),
+                    "juggler"         => BootTarget::Demo(DemoKind::Juggler),
+                    "sprite_bouncer"  => BootTarget::Demo(DemoKind::SpriteBouncer),
+                    "gfx3d_triangle"  => BootTarget::Demo(DemoKind::Gfx3dTriangle),
+                    "omega"           => BootTarget::Demo(DemoKind::Omega),
 
                     _ => return,
                 };
@@ -76,11 +84,19 @@ pub fn apply_bootargs(args: &str, config: &mut BootConfig, target: &mut BootTarg
                     core::mem::transmute::<&str, &'static str>(value)
                 });
             }
+
             "df1" => {
                 store_str(&DF1_PTR, &DF1_LEN, unsafe {
                     core::mem::transmute::<&str, &'static str>(value)
                 });
             }
+
+            "hd0" => {
+                store_str(&HD0_PTR, &HD0_LEN, unsafe {
+                    core::mem::transmute::<&str, &'static str>(value)
+                });
+            }
+
             "rom" => {
                 store_str(&ROM_PTR, &ROM_LEN, unsafe {
                     core::mem::transmute::<&str, &'static str>(value)
