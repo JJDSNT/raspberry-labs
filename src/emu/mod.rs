@@ -64,6 +64,8 @@ fn read_adf(drive: i32, name: &str, addr: usize) -> bool {
 pub fn run(fb: Framebuffer) -> ! {
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
 
+    crate::log!("EMU", "starting — sd_ok={}", crate::drivers::sdcard::is_ready());
+
     // 1. Seleciona ROM antes de omega_init().
     //    "kick12" / "kick13" são sentinels que selecionam a ROM built-in sem tocar o SD.
     //    Qualquer outro nome tenta carregar do SD card; falha cai no built-in padrão.

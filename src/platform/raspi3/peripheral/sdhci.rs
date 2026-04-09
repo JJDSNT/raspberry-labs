@@ -319,6 +319,10 @@ fn send_acmd(rca: u32, cmd: u32, arg: u32) -> Option<[u32; 4]> {
 // Inicialização
 // ---------------------------------------------------------------------------
 
+pub fn is_ready() -> bool {
+    STATE.lock().is_some()
+}
+
 pub fn init() -> bool {
     if STATE.lock().is_some() {
         return true;
@@ -462,12 +466,13 @@ pub fn read_blocks(lba: u32, buf: &mut [u8]) -> bool {
         return false;
     }
 
+    // INT_READ_RDY dispara uma vez por bloco de 512 bytes (tanto em QEMU
+    // quanto no BCM2837 real com FIFO cheio). Espera por bloco, lê 128 words.
     for blk in 0..block_count as usize {
         if wait_interrupt(INT_READ_RDY).is_err() {
-            crate::log!("SDHCI", "read timeout");
+            crate::log!("SDHCI", "read timeout blk={}", blk);
             return false;
         }
-
         let base = blk * 512;
         for i in 0..128usize {
             let w = mmio::read(SDHCI_DATA);
@@ -479,11 +484,11 @@ pub fn read_blocks(lba: u32, buf: &mut [u8]) -> bool {
         }
     }
 
-    if block_count > 1 {
-        if wait_interrupt(INT_DATA_DONE).is_err() {
-            crate::log!("SDHCI", "data done timeout");
-            return false;
-        }
+    // Sempre espera DATA_DONE — mesmo em bloco único — para limpar o estado
+    // do controller antes do próximo comando.
+    if wait_interrupt(INT_DATA_DONE).is_err() {
+        crate::log!("SDHCI", "data done timeout");
+        return false;
     }
 
     true

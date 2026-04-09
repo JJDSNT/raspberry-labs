@@ -97,7 +97,8 @@ pub fn kernel_main(info: &BootInfo) -> ! {
     spawn_runtime_self_test();
 
     // Periféricos de armazenamento e I/O
-    crate::drivers::sdcard::init();
+    let sd_ok = crate::drivers::sdcard::init();
+    crate::log!("SDCARD", "init: {}", if sd_ok { "ok" } else { "FAILED" });
     #[cfg(not(target_os = "uefi"))]
     crate::drivers::usb::init();
 

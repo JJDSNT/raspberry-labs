@@ -17,6 +17,12 @@ pub fn init() -> bool {
     crate::platform::raspi3::peripheral::sdhci::init()
 }
 
+/// Retorna `true` se o controlador foi inicializado com sucesso.
+#[inline]
+pub fn is_ready() -> bool {
+    crate::platform::raspi3::peripheral::sdhci::is_ready()
+}
+
 /// Lê `buf.len() / 512` blocos a partir do LBA informado.
 ///
 /// Requisitos:
