@@ -1,5 +1,5 @@
 // src/emu/c/omega_glue.c
-// Glue layer — replaces main.c, no SDL, no file I/O.
+// Glue layer — replaces main.c.
 // Called from Rust via extern "C".
 
 #include <stdint.h>
@@ -21,29 +21,24 @@
 #include "omega2/memory/Memory.h"
 #include "omega2/memory/memory_map.h"
 
+#include "omega2/storage/HdfDevice.h"
+
+/* ------------------------------------------------------------------------- */
+
 static MemoryMap* g_memory = 0;
+
+/* HDF global device */
+HdfDevice g_hdf_device;
+int g_hdf_enabled = 0;
 
 /*
  * ChipsetState is the global pointer set by InitChipset() in Chipset.c.
  */
 extern Chipset_t* ChipsetState;
 
-/*
- * Ajuste de posição do display Amiga no framebuffer.
- *
- * O beam começa acima e à esquerda da área visível. A fórmula garante que
- * o primeiro pixel do DIW (quando VPOS = DIWSTRT_V e HPOS = DIWSTRT_H)
- * aterrise exatamente na posição desejada no framebuffer do host.
- *
- *   frame_buffer_line = &framebuffer[stride * vpos + hstart * 2]
- *   frame_buffer      = fb - (stride * FB_LINE_OFFSET + pixel_offset)
- *
- *   -> pixel_offset = hstart * 2 - x_start
- *
- * Onde x_start é a coluna no host onde queremos que o display Amiga comece.
- * Centralizamos: x_start = (stride - AMIGA_LORES_HOST_WIDTH) / 2.
- * Para stride == 640, x_start == 0 -> imagem alinhada à esquerda.
- */
+/* ------------------------------------------------------------------------- */
+/* Framebuffer offset logic                                                    */
+/* ------------------------------------------------------------------------- */
 
 #define FB_LINE_OFFSET           20
 #define AMIGA_LORES_HOST_WIDTH  640
@@ -62,10 +57,6 @@ static void apply_fb_offset(Chipset_t* cs)
         return;
     }
 
-    /*
-     * omega_host_pitch() retorna pitch em bytes; converter para pixels
-     * (uint32_t).
-     */
     stride_px = omega_host_pitch() / (int32_t)sizeof(uint32_t);
     if (stride_px <= 0) {
         stride_px = 640;
@@ -73,19 +64,11 @@ static void apply_fb_offset(Chipset_t* cs)
 
     cs->frameBufferStride = stride_px;
 
-    /*
-     * HSTART: atualizado pelo Copper/CPU quando DIWSTRT é escrito.
-     * Antes da primeira escrita (init) vale 0 — usar padrão PAL.
-     */
     hstart = (cs->HSTART > 0) ? (int32_t)cs->HSTART
                               : AMIGA_HSTART_STANDARD;
 
     hstart2 = hstart * 2;
 
-    /*
-     * Centralizar a imagem Amiga no framebuffer; para larguras <= 640,
-     * alinhar à esquerda.
-     */
     x_start = (stride_px > AMIGA_LORES_HOST_WIDTH)
             ? (stride_px - AMIGA_LORES_HOST_WIDTH) / 2
             : 0;
@@ -94,6 +77,10 @@ static void apply_fb_offset(Chipset_t* cs)
 
     cs->frameBuffer = fb - (stride_px * FB_LINE_OFFSET + pixel_offset);
 }
+
+/* ------------------------------------------------------------------------- */
+/* INIT                                                                        */
+/* ------------------------------------------------------------------------- */
 
 void omega_init(void)
 {
@@ -118,6 +105,41 @@ void omega_init(void)
     omega_host_log("Omega: init done");
 }
 
+/* ------------------------------------------------------------------------- */
+/* HDF ATTACH                                                                  */
+/* ------------------------------------------------------------------------- */
+
+int omega_attach_hdf(const char* path)
+{
+    int rc;
+
+    if (!path || !path[0]) {
+        g_hdf_enabled = 0;
+        omega_host_log("HDF: empty path");
+        return -1;
+    }
+
+    if (g_hdf_enabled) {
+        hdf_device_shutdown(&g_hdf_device);
+        g_hdf_enabled = 0;
+    }
+
+    rc = hdf_device_init(&g_hdf_device, path);
+    if (rc != 0) {
+        g_hdf_enabled = 0;
+        omega_host_log("HDF: init failed");
+        return rc;
+    }
+
+    g_hdf_enabled = 1;
+    omega_host_log("HDF: attached");
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* FRAME LOOP                                                                  */
+/* ------------------------------------------------------------------------- */
+
 static uint32_t g_frame_count = 0;
 
 void omega_run_frame(void)
@@ -134,13 +156,6 @@ void omega_run_frame(void)
     cs = ChipsetState;
     frame_start = sched_clock();
 
-    /*
-     * Each DMA cycle = CPU_CYCLES_PER_DMA (2) CPU cycles.
-     * Run in batches of SCHED_BATCH DMA cycles for performance.
-     *
-     * Watchdog: abort frame if we exceed ~1M DMA cycles without VBL
-     * (1M / 71k cycles-per-frame ~= 14 PAL frames — enough to catch hangs).
-     */
     while (cs->VBL == 0) {
         m68k_execute(SCHED_BATCH * CPU_CYCLES_PER_DMA);
         sched_advance_n(SCHED_BATCH);
@@ -158,16 +173,10 @@ void omega_run_frame(void)
 
     g_frame_count++;
 
-    /*
-     * Early dump after frame 2 — capture AROS startup DMACON/BPLCON0 writes
-     */
     if (g_frame_count == 2) {
         probe_dump_serial(512);
     }
 
-    /*
-     * One-shot dump after frame 22 — capture after Copper list is configured
-     */
     if (g_frame_count == 22) {
         os_debug_dump();
         emu_debug_dma();
@@ -176,9 +185,6 @@ void omega_run_frame(void)
         probe_dump_serial(512);
     }
 
-    /*
-     * Drain keyboard events
-     */
     while (omega_host_poll_key(&scancode, &pressed)) {
         if (pressed) {
             pressKey(scancode);
@@ -187,9 +193,6 @@ void omega_run_frame(void)
         }
     }
 
-    /*
-     * Frame complete — reset VBL and update framebuffer pointer
-     */
     cs->VBL = 0;
     cs->needsRedraw = 0;
     apply_fb_offset(cs);
@@ -197,10 +200,10 @@ void omega_run_frame(void)
     omega_host_vsync();
 }
 
-/*
- * Called from Rust to trigger a probe dump on demand
- * (e.g. via serial command).
- */
+/* ------------------------------------------------------------------------- */
+/* DEBUG                                                                       */
+/* ------------------------------------------------------------------------- */
+
 void omega_probe_dump(uint32_t last_n)
 {
     probe_dump_serial(last_n);

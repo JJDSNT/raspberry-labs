@@ -12,6 +12,7 @@
 
 #include "omega_probe.h"
 #include "omega_host.h"
+#include "omega2/storage/HdfDevice.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -36,6 +37,9 @@
 
 #define ZORRO2_START             0x200000U
 #define ZORRO2_END               0x9FFFFFU
+
+#define HDF_BASE                 0x200000U
+#define HDF_END                  (HDF_BASE + HDF_MMIO_SIZE - 1)
 
 #define SLOW_RAM_START           0xA00000U
 #define SLOW_RAM_END             0xBEFFFFU
@@ -99,6 +103,9 @@ typedef enum
 /* -------------------------------------------------------------------------- */
 
 uint8_t *RAM24bit = (uint8_t *)0;
+
+extern HdfDevice g_hdf_device;
+extern int g_hdf_enabled;
 
 const char *regNames[] = {
     "BLTDDAT","DMACONR","VPOSR","VHPOSR","DSKDATR","JOY0DAT","JOY1DAT","CLXDAT",
@@ -303,6 +310,33 @@ static uint32_t handle_chip_ram(uint32_t address,
     return mem_read_sized(address, size);
 }
 
+static uint32_t handle_hdf_mmio(uint32_t address,
+                                MemoryAccessSize size,
+                                MemoryAccessDirection direction,
+                                uint32_t value)
+{
+    uint32_t offset = address - HDF_BASE;
+
+    if (direction == ACCESS_READ) {
+        switch (size) {
+            case MEM_SIZE_BYTE: return hdf_device_read8(&g_hdf_device, offset);
+            case MEM_SIZE_WORD: return hdf_device_read16(&g_hdf_device, offset);
+            case MEM_SIZE_LONG: return hdf_device_read32(&g_hdf_device, offset);
+        }
+        return 0;
+    }
+
+    /*
+     * MVP: só aceita escrita 32-bit nos registradores.
+     * writes 8/16-bit são ignorados por enquanto.
+     */
+    if (size == MEM_SIZE_LONG) {
+        hdf_device_write32(&g_hdf_device, offset, value);
+    }
+
+    return 0;
+}
+
 static uint32_t handle_zorro2_unmapped(MemoryAccessSize size)
 {
     (void)size;
@@ -412,6 +446,12 @@ static uint32_t ram24_dispatch(uint32_t address,
     }
 
     if (address <= ZORRO2_END) {
+        if (g_hdf_enabled &&
+            address >= HDF_BASE &&
+            address <= HDF_END) {
+            return handle_hdf_mmio(address, size, direction, value);
+        }
+
         return handle_zorro2_unmapped(size);
     }
 
