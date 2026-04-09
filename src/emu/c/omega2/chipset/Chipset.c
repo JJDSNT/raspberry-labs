@@ -898,7 +898,9 @@ void SPR0PTL(uint16_t value){
     
     //Calculate Vertical Position of Sprite
     uint32_t* data   = (uint32_t*) &ChipsetState->chipram[0xDFF120];
-    uint16_t* datst = (uint16_t*) &ChipsetState->chipram[*data];
+    uint32_t  spr0pt = (*data) & 0x00FFFFFFU;   /* mask to 24-bit Amiga address */
+    if (spr0pt + 8 > 0x01000000U) { return; }   /* out-of-range pointer guard */
+    uint16_t* datst = (uint16_t*) &ChipsetState->chipram[spr0pt];
     
     ChipsetState->sprite[0].VPOS =  ((datst[0] & 0xFF) << 8)   |  ((datst[1] & 0x400) << 6);
     
