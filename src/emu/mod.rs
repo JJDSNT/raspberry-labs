@@ -1,6 +1,7 @@
 // src/emu/mod.rs
 
 mod host;
+mod launcher;
 pub mod task;
 
 use crate::drivers::framebuffer::Framebuffer;
@@ -93,13 +94,12 @@ where
 
 /// Ponto de entrada principal — chamado por run_demo() com o framebuffer real.
 pub fn run(fb: Framebuffer) -> ! {
+    // Grava ptr/pitch para o emulador usar depois (via omega_host_framebuffer).
     host::set_framebuffer(fb.ptr as *mut u32, fb.pitch as i32);
 
     crate::log!("EMU", "starting — sd_ok={}", crate::drivers::sdcard::is_ready());
 
-    // 1. Seleciona ROM antes de omega_init().
-    //    "kick12" / "kick13" são sentinels que selecionam a ROM built-in sem tocar o SD.
-    //    Qualquer outro nome tenta carregar do SD card; falha cai no built-in padrão.
+    // 1. ROM — bootarg "rom=" ou built-in AROS.
     if let Some(name) = bootargs::rom() {
         crate::log!("EMU", "rom: loading '{}'", name);
         let buf = unsafe { core::slice::from_raw_parts_mut(ROM_ADDR as *mut u8, ROM_SIZE) };
@@ -108,48 +108,93 @@ pub fn run(fb: Framebuffer) -> ! {
             crate::log!("EMU", "rom: {} bytes loaded", n);
             host::set_rom(ROM_ADDR as *const u8, n);
         } else {
-            crate::log!("EMU", "rom: '{}' not found on SD, using built-in AROS", name);
+            crate::log!("EMU", "rom: '{}' not found on SD, using built-in", name);
         }
     }
 
-    // 2. Inicializa o emulador: carrega ROM, inicializa chipset e slots de disco.
+    // 2. Resolve seleção de disco/HDF.
+    //    Prioridade: bootargs pré-configurados (Go launcher / cmdline.txt)
+    //    Fallback: launcher interativo bare-metal (teclado USB necessário).
+    let (df0_name, df1_name, hd0_name) = resolve_media(fb);
+
+    // 3. Inicializa o emulador.
     let mut emu = OmegaEmu::new();
 
-    // 3. Anexa HDF após omega_init(), antes do loop principal.
-    if let Some(name) = bootargs::hd0() {
+    // 4. Anexa HDF.
+    if let Some(name) = hd0_name {
         crate::log!("EMU", "hd0: attaching '{}'", name);
-
         match with_c_path(name, |ptr| unsafe { omega_attach_hdf(ptr) }) {
-            Some(0) => {
-                crate::log!("EMU", "hd0: attached");
-            }
-            Some(rc) => {
-                crate::log!("EMU", "hd0: attach failed rc={}", rc);
-            }
-            None => {
-                crate::log!("EMU", "hd0: invalid path");
-            }
+            Some(0) => crate::log!("EMU", "hd0: attached"),
+            Some(rc) => crate::log!("EMU", "hd0: attach failed rc={}", rc),
+            None     => crate::log!("EMU", "hd0: invalid path"),
         }
     }
 
-    // 4. Lê ADFs do SD e insere nos slots — após FloppyInit(), ordem natural.
-    //    EMMC já foi inicializado em kernel_main; read_blocks falha silenciosamente
-    //    se o controlador não estiver disponível.
-    if let Some(name) = bootargs::df0() {
+    // 5. Carrega e insere ADFs.
+    if let Some(name) = df0_name {
         if read_adf(0, name, DF0_ADDR) {
             unsafe { FloppyInsert(0, DF0_ADDR as *mut u8); }
         }
     }
-    if let Some(name) = bootargs::df1() {
+    if let Some(name) = df1_name {
         if read_adf(1, name, DF1_ADDR) {
             unsafe { FloppyInsert(1, DF1_ADDR as *mut u8); }
         }
     }
 
-    // 5. Spawna USB após o SD para evitar contenção de IRQ durante a leitura.
-    let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
-
     loop {
         emu.run_frame();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Resolução de mídia
+// ---------------------------------------------------------------------------
+
+/// Retorna (df0, df1, hd0) como Option<&'static str>.
+///
+/// Caminho 1 — bootargs pré-configurados (Go launcher ou cmdline.txt):
+///   df0=/hd0= já estão definidos; spawna USB e usa esses valores.
+///
+/// Caminho 2 — launcher interativo (bare-metal, teclado USB necessário):
+///   Quando nenhum bootarg de disco está definido, mostra o launcher na tela,
+///   spawna USB para receber teclas e aguarda confirmação do utilizador.
+fn resolve_media(
+    fb: Framebuffer,
+) -> (Option<&'static str>, Option<&'static str>, Option<&'static str>) {
+    let pre_df0 = bootargs::df0();
+    let pre_df1 = bootargs::df1();
+    let pre_hd0 = bootargs::hd0();
+
+    if pre_df0.is_some() || pre_df1.is_some() || pre_hd0.is_some() {
+        // Bootargs configurados — usa direto, spawna USB para teclado no emu.
+        let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
+        return (pre_df0, pre_df1, pre_hd0);
+    }
+
+    // Launcher interativo: spawna USB primeiro (teclado), depois mostra UI.
+    let _ = crate::kernel::scheduler::spawn("usb", crate::drivers::usb::usb_task);
+
+    crate::log!("EMU", "launcher: no bootargs, showing selection UI");
+
+    let cfg = launcher::run(fb);
+
+    // Promove strings do resultado para 'static via buffers estáticos.
+    static mut DF0_BUF: [u8; 64] = [0u8; 64];
+    static mut DF1_BUF: [u8; 64] = [0u8; 64];
+    static mut HD0_BUF: [u8; 64] = [0u8; 64];
+
+    let df0 = promote_static(unsafe { &mut *core::ptr::addr_of_mut!(DF0_BUF) }, &cfg.df0, cfg.df0_len);
+    let df1 = promote_static(unsafe { &mut *core::ptr::addr_of_mut!(DF1_BUF) }, &cfg.df1, cfg.df1_len);
+    let hd0 = promote_static(unsafe { &mut *core::ptr::addr_of_mut!(HD0_BUF) }, &cfg.hd0, cfg.hd0_len);
+
+    (df0, df1, hd0)
+}
+
+/// Copia `src[..len]` para `dst` e retorna Option<&'static str>.
+fn promote_static(dst: &'static mut [u8; 64], src: &[u8; 64], len: usize) -> Option<&'static str> {
+    if len == 0 { return None; }
+    let l = len.min(64);
+    dst[..l].copy_from_slice(&src[..l]);
+    core::str::from_utf8(&dst[..l]).ok()
 }

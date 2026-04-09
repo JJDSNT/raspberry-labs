@@ -112,6 +112,10 @@ fn main() {
         .file("src/emu/c/omega2/chipset/paula/Floppy.c")
         .file("src/emu/c/omega2/chipset/paula/Paula.c")
 
+        // storage
+        .file("src/emu/c/omega2/storage/HdfBackend.c")
+        .file("src/emu/c/omega2/storage/HdfDevice.c")
+
         // cpu
         .file("src/emu/c/omega2/cpu/m68kcpu.c")
         .file("src/emu/c/omega2/cpu/m68kops.c")
@@ -135,6 +139,7 @@ fn main() {
         .include("src/emu/c/omega2/chipset/denise")
         .include("src/emu/c/omega2/memory")
         .include("src/emu/c/omega2/chipset/paula")
+        .include("src/emu/c/omega2/storage")
         .flag("-Wno-pointer-to-int-cast");
 
     apply_common_flags(&mut builder, &endian);

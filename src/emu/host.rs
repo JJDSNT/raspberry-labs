@@ -30,14 +30,12 @@ pub extern "C" fn omega_host_rom_size() -> usize {
 
 // ---------------------------------------------------------------------------
 // Ring buffer de eventos de teclado (USB HID → emulador)
-// Produzido pelo callback TinyUSB (omega_host_push_key).
-// Consumido pelo loop do emulador (omega_host_poll_key).
 // ---------------------------------------------------------------------------
 
 const KEY_RING_SIZE: usize = 64;
 
 struct KeyRing {
-    buf:  [(u8, u8); KEY_RING_SIZE], // (scancode, pressed)
+    buf:  [(u8, u8); KEY_RING_SIZE],
     head: usize,
     tail: usize,
 }
@@ -53,7 +51,6 @@ impl KeyRing {
             self.buf[self.tail] = (scancode, pressed);
             self.tail = next;
         }
-        // silently drops events when full
     }
 
     fn pop(&mut self) -> Option<(u8, u8)> {
@@ -66,7 +63,12 @@ impl KeyRing {
 
 static KEY_RING: IrqSafeSpinLock<KeyRing> = IrqSafeSpinLock::new(KeyRing::new());
 
-/// Chamado pelo kernel antes de spawnar a task do emulador.
+/// Versão Rust de omega_host_poll_key — usada pelo launcher.
+/// Retorna `Some((scancode, pressed))` ou `None` se o ring estiver vazio.
+pub fn poll_key() -> Option<(u8, bool)> {
+    KEY_RING.lock().pop().map(|(sc, pr)| (sc, pr != 0))
+}
+
 pub fn set_framebuffer(ptr: *mut u32, pitch: i32) {
     FB_PTR.store(ptr, Ordering::Release);
     FB_PITCH.store(pitch, Ordering::Release);
@@ -84,42 +86,36 @@ pub extern "C" fn omega_host_pitch() -> i32 {
 
 #[no_mangle]
 pub extern "C" fn omega_host_vsync() {
-    // Yield to kernel scheduler — gives other tasks a turn
     crate::kernel::scheduler::yield_now();
 }
 
 #[no_mangle]
 pub extern "C" fn omega_host_log(msg: *const core::ffi::c_char) {
     if msg.is_null() { return; }
-    // Convert C string and log via kernel
+
     let bytes = unsafe {
         let mut len = 0;
         while *msg.add(len) != 0 { len += 1; }
         core::slice::from_raw_parts(msg as *const u8, len)
     };
+
     if let Ok(s) = core::str::from_utf8(bytes) {
         crate::log!("EMU", "{}", s);
     }
 }
 
-/// Chamado pelo emulador com um par de amostras de áudio PCM estéreo.
-/// No-op por enquanto — o driver PWM/I2S para Pi 3 ainda não está implementado.
 #[no_mangle]
 pub extern "C" fn omega_host_audio_sample(
     _left:  core::ffi::c_short,
     _right: core::ffi::c_short,
 ) {
-    // TODO: feed into Pi 3 PWM audio ring buffer when audio driver is ready
 }
 
-/// Chamado pelo TinyUSB HID (omega_input.c) para enfileirar um evento de tecla.
 #[no_mangle]
 pub extern "C" fn omega_host_push_key(scancode: u8, pressed: core::ffi::c_int) {
     KEY_RING.lock().push(scancode, if pressed != 0 { 1 } else { 0 });
 }
 
-/// Chamado pelo emulador (omega_glue.c) para retirar um evento da fila.
-/// Retorna 1 se havia evento, 0 se a fila estava vazia.
 #[no_mangle]
 pub extern "C" fn omega_host_poll_key(
     scancode: *mut u8,
@@ -133,4 +129,83 @@ pub extern "C" fn omega_host_poll_key(
         }
         None => 0,
     }
+}
+
+// ---------------------------------------------------------------------------
+// HDF backend (C ↔ Rust bridge) — leitura streaming direto do SD card
+// ---------------------------------------------------------------------------
+
+struct HdfFile {
+    inner: crate::fs::fat32::Fat32File,
+}
+
+// Safety: Fat32File contém apenas campos primitivos (u32/u64), é Send.
+unsafe impl Send for HdfFile {}
+
+static HDF_FILE: IrqSafeSpinLock<Option<HdfFile>> =
+    IrqSafeSpinLock::new(None);
+
+/// Valor sentinel não-nulo devolvido como handle opaco para o C.
+const HDF_SENTINEL: usize = 1;
+
+#[no_mangle]
+pub extern "C" fn omega_hdf_open(
+    path: *const u8,
+    size_out: *mut u64,
+) -> *mut core::ffi::c_void {
+    if path.is_null() || size_out.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    let path_str = unsafe {
+        let mut len = 0;
+        while *path.add(len) != 0 { len += 1; }
+        core::str::from_utf8_unchecked(core::slice::from_raw_parts(path, len))
+    };
+
+    crate::log!("EMU", "HDF open '{}'", path_str);
+
+    let file = match crate::fs::fat32::open_file(path_str) {
+        Some(f) => f,
+        None => {
+            crate::log!("EMU", "HDF '{}' not found on SD", path_str);
+            return core::ptr::null_mut();
+        }
+    };
+
+    let size = file.file_size as u64;
+    unsafe { *size_out = size; }
+
+    *HDF_FILE.lock() = Some(HdfFile { inner: file });
+
+    crate::log!("EMU", "HDF opened ({} bytes)", size);
+
+    HDF_SENTINEL as *mut core::ffi::c_void
+}
+
+#[no_mangle]
+pub extern "C" fn omega_hdf_read(
+    handle: *mut core::ffi::c_void,
+    offset: u64,
+    buffer: *mut u8,
+    size: u32,
+) -> i32 {
+    if handle.is_null() || buffer.is_null() { return -1; }
+
+    let mut guard = HDF_FILE.lock();
+    let Some(file) = &mut *guard else { return -2; };
+
+    let buf = unsafe { core::slice::from_raw_parts_mut(buffer, size as usize) };
+    let n   = file.inner.read_at(offset, buf);
+
+    if n == size as usize { 0 } else { -3 }
+}
+
+#[no_mangle]
+pub extern "C" fn omega_hdf_close(
+    handle: *mut core::ffi::c_void,
+) {
+    if handle.is_null() { return; }
+    *HDF_FILE.lock() = None;
+    crate::log!("EMU", "HDF closed");
 }

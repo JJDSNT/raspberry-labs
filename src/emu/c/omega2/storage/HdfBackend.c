@@ -2,82 +2,82 @@
 
 #include <string.h>
 
-int hdf_open(HdfBackend* hdf, const char* path) {
-    long size;
+/*
+ * Backend real implementado no lado Rust.
+ *
+ * Contrato esperado:
+ *
+ *   omega_hdf_open(path, &size_bytes) -> handle opaco ou NULL
+ *   omega_hdf_read(handle, offset, dst, size) -> 0 sucesso, <0 erro
+ *   omega_hdf_close(handle)
+ *
+ * O Rust pode implementar isso usando FAT32 + SD card.
+ */
+
+extern HdfHandle omega_hdf_open(const char* path, uint64_t* size_bytes);
+extern int omega_hdf_read(HdfHandle handle, uint64_t offset, void* buffer, uint32_t size);
+extern void omega_hdf_close(HdfHandle handle);
+
+int hdf_open(HdfBackend* hdf, const char* path)
+{
+    uint64_t size_bytes = 0;
+    HdfHandle handle;
 
     if (!hdf || !path) return -1;
 
     memset(hdf, 0, sizeof(*hdf));
 
-    hdf->fp = fopen(path, "rb");
-    if (!hdf->fp) return -2;
+    handle = omega_hdf_open(path, &size_bytes);
+    if (!handle) return -2;
 
-    if (fseek(hdf->fp, 0, SEEK_END) != 0) {
-        fclose(hdf->fp);
-        hdf->fp = NULL;
+    if (size_bytes < HDF_BLOCK_SIZE) {
+        omega_hdf_close(handle);
         return -3;
     }
 
-    size = ftell(hdf->fp);
-    if (size < 0) {
-        fclose(hdf->fp);
-        hdf->fp = NULL;
+    if ((size_bytes % HDF_BLOCK_SIZE) != 0) {
+        omega_hdf_close(handle);
         return -4;
     }
 
-    if (fseek(hdf->fp, 0, SEEK_SET) != 0) {
-        fclose(hdf->fp);
-        hdf->fp = NULL;
-        return -5;
-    }
-
-    if (size < HDF_BLOCK_SIZE) {
-        fclose(hdf->fp);
-        hdf->fp = NULL;
-        return -6;
-    }
-
-    if ((size % HDF_BLOCK_SIZE) != 0) {
-        fclose(hdf->fp);
-        hdf->fp = NULL;
-        return -7;
-    }
-
-    hdf->size_bytes = (uint64_t)size;
-    hdf->total_blocks = hdf->size_bytes / HDF_BLOCK_SIZE;
+    hdf->handle = handle;
+    hdf->size_bytes = size_bytes;
+    hdf->total_blocks = size_bytes / HDF_BLOCK_SIZE;
 
     return 0;
 }
 
-void hdf_close(HdfBackend* hdf) {
+void hdf_close(HdfBackend* hdf)
+{
     if (!hdf) return;
 
-    if (hdf->fp) {
-        fclose(hdf->fp);
+    if (hdf->handle) {
+        omega_hdf_close(hdf->handle);
     }
 
-    hdf->fp = NULL;
+    hdf->handle = (HdfHandle)0;
     hdf->size_bytes = 0;
     hdf->total_blocks = 0;
 }
 
-int hdf_read(HdfBackend* hdf, uint64_t lba, uint32_t count, void* buffer) {
+int hdf_read(HdfBackend* hdf, uint64_t lba, uint32_t count, void* buffer)
+{
     uint64_t offset;
-    size_t bytes_read;
-    size_t bytes_total;
+    uint64_t bytes_total;
 
-    if (!hdf || !hdf->fp || !buffer) return -1;
+    if (!hdf || !hdf->handle || !buffer) return -1;
     if (count == 0) return 0;
     if (lba >= hdf->total_blocks) return -2;
     if ((lba + count) > hdf->total_blocks) return -3;
 
     offset = lba * HDF_BLOCK_SIZE;
-    bytes_total = (size_t)count * HDF_BLOCK_SIZE;
+    bytes_total = (uint64_t)count * HDF_BLOCK_SIZE;
 
-    if (fseek(hdf->fp, (long)offset, SEEK_SET) != 0) return -4;
+    /*
+     * O backend Rust recebe tamanho em u32.
+     * Para o MVP isso é suficiente; count costuma ser pequeno.
+     */
+    if (bytes_total > 0xFFFFFFFFu) return -4;
 
-    bytes_read = fread(buffer, 1, bytes_total, hdf->fp);
-    if (bytes_read != bytes_total) return -5;
-
-    return 0;
+    return omega_hdf_read(hdf->handle, offset, buffer, (uint32_t)bytes_total);
 }
