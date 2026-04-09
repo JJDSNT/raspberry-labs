@@ -38,7 +38,8 @@ const (
 
 type LaunchSelection struct {
 	ROMFile  string
-	DiskFile string
+	DiskFile string // df0
+	HDFFile  string // hd0 (opcional)
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,10 @@ func AvailableDisks() ([]string, error) {
 	return listFilesByExt(disksDir(), ".adf")
 }
 
+func AvailableHDFs() ([]string, error) {
+	return listFilesByExt(disksDir(), ".hdf")
+}
+
 // ---------------------------------------------------------------------------
 // Launch
 // ---------------------------------------------------------------------------
@@ -167,6 +172,9 @@ func (c *Config) LaunchWithOptions(screen ScreenOption, display DisplayMode, sel
 	if c.BootArg == "omega" {
 		if sel.DiskFile != "" {
 			bootargs += " df0=" + sel.DiskFile
+		}
+		if sel.HDFFile != "" {
+			bootargs += " hd0=" + sel.HDFFile
 		}
 
 		rom := sel.ROMFile

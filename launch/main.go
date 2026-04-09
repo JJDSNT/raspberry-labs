@@ -30,6 +30,7 @@ func main() {
 		demo.LaunchSelection{
 			ROMFile:  result.SelectedROM,
 			DiskFile: result.SelectedDisk,
+			HDFFile:  result.SelectedHDF,
 		},
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "launch error: %v\n", err)

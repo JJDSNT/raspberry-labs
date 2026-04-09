@@ -51,6 +51,7 @@ var (
 const (
 	noRomOption  = "(sem rom)"
 	noDiskOption = "(sem disco)"
+	noHDFOption  = "(sem hdf)"
 )
 
 type step int
@@ -59,6 +60,7 @@ const (
 	stepSelectDemo step = iota
 	stepSelectROM
 	stepSelectDisk
+	stepSelectHDF
 	stepSelectDisplay
 	stepSelectScreen
 )
@@ -92,10 +94,12 @@ type Model struct {
 	Screen   demo.ScreenOption
 	Display  demo.DisplayMode
 
-	roms         []string
-	disks        []string
+	roms        []string
+	disks       []string
+	hdfs        []string
 	SelectedROM  string
 	SelectedDisk string
+	SelectedHDF  string
 
 	quitting bool
 	err      error
@@ -104,9 +108,11 @@ type Model struct {
 func NewModel() Model {
 	roms, _ := demo.AvailableROMs()
 	disks, _ := demo.AvailableDisks()
+	hdfs, _ := demo.AvailableHDFs()
 
 	roms = append([]string{noRomOption}, roms...)
 	disks = append([]string{noDiskOption}, disks...)
+	hdfs = append([]string{noHDFOption}, hdfs...)
 
 	return Model{
 		demos:   demo.All,
@@ -116,6 +122,7 @@ func NewModel() Model {
 		Screen:  allScreenOptions[0],
 		roms:    roms,
 		disks:   disks,
+		hdfs:    hdfs,
 	}
 }
 
@@ -164,10 +171,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case stepSelectDisk:
 				m.step = stepSelectROM
 				m.cursor = m.selectedROMIndex()
+			case stepSelectHDF:
+				m.step = stepSelectDisk
+				m.cursor = m.selectedDiskIndex()
 			case stepSelectDisplay:
 				if m.needsMediaSelection() {
-					m.step = stepSelectDisk
-					m.cursor = m.selectedDiskIndex()
+					m.step = stepSelectHDF
+					m.cursor = m.selectedHDFIndex()
 				} else {
 					m.step = stepSelectDemo
 					m.cursor = m.selectedDemoIndex()
@@ -212,6 +222,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.SelectedDisk = chosen
 					}
 				}
+				m.step = stepSelectHDF
+				m.cursor = m.selectedHDFIndex()
+
+			case stepSelectHDF:
+				if len(m.hdfs) > 0 {
+					chosen := m.hdfs[m.cursor]
+					if chosen == noHDFOption {
+						m.SelectedHDF = ""
+					} else {
+						m.SelectedHDF = chosen
+					}
+				}
 				m.step = stepSelectDisplay
 				m.cursor = m.selectedDisplayIndex()
 
@@ -250,6 +272,8 @@ func (m Model) View() string {
 		return m.viewROMs()
 	case stepSelectDisk:
 		return m.viewDisks()
+	case stepSelectHDF:
+		return m.viewHDFs()
 	case stepSelectDisplay:
 		return m.viewDisplayOptions()
 	case stepSelectScreen:
@@ -311,7 +335,29 @@ func (m Model) viewROMs() string {
 }
 
 func (m Model) viewDisks() string {
-	title := styleTitle.Render("  Selecione o disco")
+	title := styleTitle.Render("  Selecione o disco (DF0)")
+
+	romLabel := m.SelectedROM
+	if romLabel == "" {
+		romLabel = "nenhuma"
+	}
+
+	summary := styleSummary.Render(fmt.Sprintf(
+		"Demo: %s   |   ROM: %s",
+		m.selectedDemoName(),
+		romLabel,
+	))
+
+	return styleBorder.Render(fmt.Sprintf("%s\n%s\n%s\n%s",
+		title,
+		summary,
+		m.renderSimpleList(m.disks),
+		styleHelp.Render("↑/↓ navegar   ↵ selecionar   esc voltar   q sair"),
+	)) + "\n"
+}
+
+func (m Model) viewHDFs() string {
+	title := styleTitle.Render("  Selecione o disco rígido (HD0)")
 
 	romLabel := m.SelectedROM
 	if romLabel == "" {
@@ -324,7 +370,7 @@ func (m Model) viewDisks() string {
 	}
 
 	summary := styleSummary.Render(fmt.Sprintf(
-		"Demo: %s   |   ROM: %s   |   Disco: %s",
+		"Demo: %s   |   ROM: %s   |   DF0: %s",
 		m.selectedDemoName(),
 		romLabel,
 		diskLabel,
@@ -333,7 +379,7 @@ func (m Model) viewDisks() string {
 	return styleBorder.Render(fmt.Sprintf("%s\n%s\n%s\n%s",
 		title,
 		summary,
-		m.renderSimpleList(m.disks),
+		m.renderSimpleList(m.hdfs),
 		styleHelp.Render("↑/↓ navegar   ↵ selecionar   esc voltar   q sair"),
 	)) + "\n"
 }
@@ -445,6 +491,11 @@ func (m Model) maxCursor() int {
 			return 0
 		}
 		return len(m.disks) - 1
+	case stepSelectHDF:
+		if len(m.hdfs) == 0 {
+			return 0
+		}
+		return len(m.hdfs) - 1
 	case stepSelectDisplay:
 		return len(displayOptions) - 1
 	case stepSelectScreen:
@@ -534,6 +585,24 @@ func (m Model) selectedDiskIndex() int {
 
 	for i, disk := range m.disks {
 		if disk == m.SelectedDisk {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m Model) selectedHDFIndex() int {
+	if m.SelectedHDF == "" {
+		for i, h := range m.hdfs {
+			if h == noHDFOption {
+				return i
+			}
+		}
+		return 0
+	}
+
+	for i, h := range m.hdfs {
+		if h == m.SelectedHDF {
 			return i
 		}
 	}
